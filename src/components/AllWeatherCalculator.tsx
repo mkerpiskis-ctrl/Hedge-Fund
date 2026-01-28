@@ -55,9 +55,7 @@ const AllWeatherCalculator: React.FC = () => {
 
     const [results, setResults] = useState<ResultRow[]>([]);
     const [totalValue, setTotalValue] = useState<number>(0);
-    const [totalCost, setTotalCost] = useState<number>(0);
     const [totalPnL, setTotalPnL] = useState<number>(0);
-    const [totalTargetWeight, setTotalTargetWeight] = useState<number>(100);
 
     const handleInputChange = (id: string, field: 'price' | 'units' | 'targetWeight' | 'averagePrice', value: string) => {
         setAssets(prev => prev.map(a => a.id === id ? { ...a, [field]: value } : a));
@@ -113,8 +111,6 @@ const AllWeatherCalculator: React.FC = () => {
 
     useEffect(() => {
         // Calc total target weight
-        const totalTgt = assets.reduce((sum, a) => sum + safeParse(a.targetWeight), 0);
-        setTotalTargetWeight(totalTgt);
         calculate();
     }, [assets, cash]);
 
@@ -146,7 +142,6 @@ const AllWeatherCalculator: React.FC = () => {
         }, 0);
 
         setTotalValue(portfolioTotal);
-        setTotalCost(costBasis);
         setTotalPnL(currentTotalAssets - costBasis);
 
         // 2. Calculate targets and deltas
