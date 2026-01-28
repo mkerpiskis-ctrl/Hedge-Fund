@@ -17,8 +17,12 @@ export default function Auth() {
         });
 
         if (error) {
-            setMessage(error.message);
-            alert(error.message);
+            let msg = error.message;
+            if (msg === 'Failed to fetch') {
+                msg = 'Connection failed. Please check your Vercel Environment Variables (URL & Key) and ensure you have redeployed.';
+            }
+            setMessage(msg);
+            alert(msg);
         } else {
             setMessage('Check your email for the login link!');
         }
