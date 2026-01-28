@@ -1,11 +1,32 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { supabase } from './supabaseClient';
+import Auth from './components/Auth';
 import OperatorsProtocol from './components/OperatorsProtocol';
 
 import AllWeatherCalculator from './components/AllWeatherCalculator';
 import FireTracker from './components/FireTracker';
 
 function App() {
+  const [session, setSession] = useState<any>(null);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'calculators' | 'fireTracker'>('dashboard');
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  if (!session) {
+    return <Auth />;
+  }
 
   return (
     <div className="min-h-screen p-4 md:p-8">
