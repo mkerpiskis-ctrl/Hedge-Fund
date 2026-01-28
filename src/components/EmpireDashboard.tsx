@@ -24,6 +24,7 @@ export default function EmpireDashboard() {
     const [businessData, setBusinessData] = useState<BusinessMetric[]>([]);
     const [fireData, setFireData] = useState<FireEntry[]>([]);
     const [isLogModalOpen, setLogModalOpen] = useState(false);
+    const [isEditBizModalOpen, setEditBizModalOpen] = useState(false);
 
     // Form State
     const [logForm, setLogForm] = useState({
@@ -110,6 +111,29 @@ export default function EmpireDashboard() {
         alert('Month Logged Successfully!');
     };
 
+    const handleDeleteBizEntry = (index: number) => {
+        if (window.confirm('Delete this entry?')) {
+            const updated = [...businessData];
+            updated.splice(index, 1);
+            setBusinessData(updated);
+            localStorage.setItem('empire_business_data', JSON.stringify(updated));
+        }
+    };
+
+    const handleUpdateBizEntry = (index: number, field: keyof BusinessMetric, value: string) => {
+        const updated = [...businessData];
+        // Handle number parsing
+        if (field === 'month') {
+            // @ts-ignore
+            updated[index][field] = value;
+        } else {
+            // @ts-ignore
+            updated[index][field] = parseFloat(value) || 0;
+        }
+        setBusinessData(updated);
+        localStorage.setItem('empire_business_data', JSON.stringify(updated));
+    };
+
     // --- CALCULATIONS FOR UI ---
 
     // Most recent Business
@@ -142,12 +166,20 @@ export default function EmpireDashboard() {
                         <span className="w-3 h-3 bg-amber-500 rounded-sm mr-3 shadow-[0_0_10px_rgba(245,158,11,0.5)]"></span>
                         Hedge Fund Ops
                     </h2>
-                    <button
-                        onClick={() => setLogModalOpen(true)}
-                        className="bg-emerald-500/10 border border-emerald-500/50 text-emerald-400 hover:bg-emerald-500 hover:text-slate-900 px-4 py-2 rounded text-xs font-bold uppercase transition-all tracking-wider"
-                    >
-                        + Log Month
-                    </button>
+                    <div className="flex space-x-2">
+                        <button
+                            onClick={() => setEditBizModalOpen(true)}
+                            className="bg-slate-800 text-slate-400 hover:text-white px-3 py-2 rounded text-xs font-bold uppercase transition-all"
+                        >
+                            History
+                        </button>
+                        <button
+                            onClick={() => setLogModalOpen(true)}
+                            className="bg-emerald-500/10 border border-emerald-500/50 text-emerald-400 hover:bg-emerald-500 hover:text-slate-900 px-4 py-2 rounded text-xs font-bold uppercase transition-all tracking-wider"
+                        >
+                            + Log Month
+                        </button>
+                    </div>
                 </div>
 
                 {/* KPI CARDS */}
@@ -407,6 +439,89 @@ export default function EmpireDashboard() {
                             >
                                 CONFIRM LOG ENTRY
                             </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* EDIT HISTORY MODAL */}
+            {isEditBizModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
+                    <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto shadow-2xl">
+                        <div className="p-6 border-b border-slate-800 flex justify-between items-center">
+                            <h3 className="text-lg font-bold text-slate-100">Edit History (Hedge Fund)</h3>
+                            <button onClick={() => setEditBizModalOpen(false)} className="text-slate-500 hover:text-slate-100">✕</button>
+                        </div>
+                        <div className="p-6">
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-left border-collapse">
+                                    <thead>
+                                        <tr className="text-xs uppercase text-slate-500 border-b border-slate-800">
+                                            <th className="p-3">Month</th>
+                                            <th className="p-3">C2 Subs</th>
+                                            <th className="p-3">eToro Copiers</th>
+                                            <th className="p-3">AUC ($)</th>
+                                            <th className="p-3 text-emerald-400">Net Income ($)</th>
+                                            <th className="p-3">Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="text-sm text-slate-300">
+                                        {businessData.map((row, idx) => (
+                                            <tr key={idx} className="border-b border-slate-800/50 hover:bg-slate-800/30">
+                                                <td className="p-3">
+                                                    <input
+                                                        type="date"
+                                                        value={row.month}
+                                                        onChange={(e) => handleUpdateBizEntry(idx, 'month', e.target.value)}
+                                                        className="bg-transparent border border-slate-700 rounded px-2 py-1 w-32 focus:border-amber-500 outline-none"
+                                                    />
+                                                </td>
+                                                <td className="p-3">
+                                                    <input
+                                                        type="number"
+                                                        value={row.c2Subs}
+                                                        onChange={(e) => handleUpdateBizEntry(idx, 'c2Subs', e.target.value)}
+                                                        className="bg-transparent border border-slate-700 rounded px-2 py-1 w-20 focus:border-amber-500 outline-none"
+                                                    />
+                                                </td>
+                                                <td className="p-3">
+                                                    <input
+                                                        type="number"
+                                                        value={row.etoroCopiers}
+                                                        onChange={(e) => handleUpdateBizEntry(idx, 'etoroCopiers', e.target.value)}
+                                                        className="bg-transparent border border-slate-700 rounded px-2 py-1 w-20 focus:border-amber-500 outline-none"
+                                                    />
+                                                </td>
+                                                <td className="p-3">
+                                                    <input
+                                                        type="number"
+                                                        value={row.auc}
+                                                        onChange={(e) => handleUpdateBizEntry(idx, 'auc', e.target.value)}
+                                                        className="bg-transparent border border-slate-700 rounded px-2 py-1 w-24 focus:border-amber-500 outline-none"
+                                                    />
+                                                </td>
+                                                <td className="p-3">
+                                                    <input
+                                                        type="number"
+                                                        value={row.netIncome}
+                                                        onChange={(e) => handleUpdateBizEntry(idx, 'netIncome', e.target.value)}
+                                                        className="bg-transparent border border-slate-700 rounded px-2 py-1 w-24 border-emerald-500/30 text-emerald-400 focus:border-emerald-500 outline-none"
+                                                    />
+                                                </td>
+                                                <td className="p-3">
+                                                    <button
+                                                        onClick={() => handleDeleteBizEntry(idx)}
+                                                        className="text-rose-500 hover:text-rose-400 p-1"
+                                                        title="Delete Entry"
+                                                    >
+                                                        ✕
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
                 </div>
