@@ -8,21 +8,28 @@ import FireTracker from './components/FireTracker';
 
 function App() {
   const [session, setSession] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'calculators' | 'fireTracker'>('dashboard');
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
+      setLoading(false);
     });
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
+      setLoading(false);
     });
 
     return () => subscription.unsubscribe();
   }, []);
+
+  if (loading) {
+    return <div className="min-h-screen flex items-center justify-center text-slate-500 font-mono text-sm">Initializing Secure Environment...</div>;
+  }
 
   if (!session) {
     return <Auth />;
