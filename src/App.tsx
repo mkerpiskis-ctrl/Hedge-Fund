@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
 import Auth from './components/Auth';
-import OperatorsProtocol from './components/OperatorsProtocol';
-
+import EmpireDashboard from './components/EmpireDashboard';
 import AllWeatherCalculator from './components/AllWeatherCalculator';
 import FireTracker from './components/FireTracker';
 
@@ -54,10 +53,12 @@ function App() {
         </div>
 
         <div className="flex items-center space-x-6">
-          <div className="text-right hidden md:block">
-            <div className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider">Net Income Target</div>
-            <div className="text-emerald-400 font-bold text-lg">$5,000<span className="text-slate-600 text-sm">/mo</span></div>
-          </div>
+          <button
+            onClick={() => supabase.auth.signOut()}
+            className="text-xs text-slate-500 hover:text-rose-500 transition-colors uppercase font-bold"
+          >
+            Sign Out
+          </button>
           <div className="h-8 w-px bg-slate-800 hidden md:block"></div>
           <div className="flex items-center space-x-2 bg-slate-900/50 px-3 py-1.5 rounded-full border border-slate-800">
             <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
@@ -76,7 +77,7 @@ function App() {
               : 'text-slate-500 hover:text-slate-300'
               }`}
           >
-            DASHBOARD
+            EMPIRE DASHBOARD
             {activeTab === 'dashboard' && (
               <div className="absolute bottom-[-5px] left-0 w-full h-0.5 bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.5)]"></div>
             )}
@@ -100,7 +101,7 @@ function App() {
               : 'text-slate-500 hover:text-slate-300'
               }`}
           >
-            FIRE TRACKER
+            FIRE DEEP DIVE
             {activeTab === 'fireTracker' && (
               <div className="absolute bottom-[-5px] left-0 w-full h-0.5 bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.5)]"></div>
             )}
@@ -110,27 +111,9 @@ function App() {
 
       <main className="max-w-7xl mx-auto space-y-8 animate-fade-in">
 
-        {/* DASHBOARD TAB */}
+        {/* DASHBOARD TAB (EMPIRE) */}
         {activeTab === 'dashboard' && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            {/* Left: Operators Protocol */}
-            <div className="lg:col-span-2 glass-panel p-6">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-lg font-semibold text-slate-200">Operator's Protocol</h2>
-                <span className="text-xs font-mono text-slate-500 bg-slate-900 px-2 py-1 rounded">SYS.PROC.01</span>
-              </div>
-              <OperatorsProtocol />
-            </div>
-
-            {/* Right: KPI Tracker (Placeholder) */}
-            <div className="glass-panel p-6 flex flex-col items-center justify-center min-h-[300px] border-dashed border-slate-700 bg-slate-900/30">
-              <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center mb-4">
-                <span className="text-slate-600 text-xl font-bold">#</span>
-              </div>
-              <h3 className="text-slate-400 font-medium mb-1">KPI Tracker</h3>
-              <p className="text-xs text-slate-600 text-center px-4">Database connection established. Waiting for data stream...</p>
-            </div>
-          </div>
+          <EmpireDashboard />
         )}
 
         {/* CALCULATORS TAB */}

@@ -23,12 +23,40 @@
 
 ## 3. CORE APP FEATURES (Functional Requirements)
 
-### Feature 1: The "Operator's Protocol" (Checklist)
-A dynamic daily/weekly to-do list based on specific times:
-- **09:00 (Pre-Market):** Check IBKR connection (C2 status) & eToro notifications.
-- **16:30 (Market Open):** Check for "Breakout" signals (Manual entry).
-- **17:00 (Marketing):** Prompt user to write an eToro feed post (Required for "Popular Investor" status).
-- **End of Day:** Log P&L and confirm "Discipline" (Yes/No).
+### Feature 1: The "Empire Dashboard" (KPI + FIRE Vault)
+**Purpose:** A single-view "Head-Up Display" to track Business Growth (Income) and Personal Freedom (Net Worth).
+
+**PART A: BUSINESS KPI TRACKER (The Engine)**
+**Goal:** Track the growth of the Hedge Fund revenue streams.
+- **Data Points (Monthly Entry):**
+  - `Month` (e.g., "2026-02")
+  - `C2 Subscribers` (Target: 40)
+  - `eToro Copiers` (Social Proof)
+  - `Assets Under Copy (AUC)` (eToro Tier metric)
+  - `Net Income ($)` (Total Revenue - Expenses)
+- **Visuals:**
+  - **"Income Trend" Chart:** A simple line chart showing Net Income over the last 12 months.
+  - **"Subscriber Count" Card:** Big number display vs Goal (e.g., "12 / 40").
+
+**PART B: THE "FIRE 2035" VAULT (The Goal)**
+**Goal:** Track capital injections towards the 2035 retirement target.
+- **Inputs (The Monthly Deposit Ritual):**
+  - `Operator Contribution (EUR)`: (Default: €500)
+  - `Operator Contribution (USD)`: (Default: $700)
+  - `Wife Contribution (EUR)`: (Default: €250)
+  - `EUR/USD Rate`: (Manual input or default 1.05)
+- **Logic:**
+  - `Total Monthly Added ($)` = `(Op_EUR + Wife_EUR) * Rate + Op_USD`.
+  - `Vault Total` = Previous Total + Total Monthly Added + Investment Returns (Optional manual adjustment).
+- **Visuals:**
+  - **The "Freedom Bar":** A progress bar from **Start Date (2026)** to **End Date (2035)**.
+  - **The "Capital Bar":** A progress bar from **$0** to **$X Target** (e.g., $1,000,000).
+  - **"Runway" Metric:** "9 Years remaining".
+
+**UI/UX:**
+- **Style:** "Dark Mode Financial Terminal". Minimalist.
+- **Grid Layout:** Left side = Business KPIs. Right side = Personal Vault.
+- **Action:** A prominent "LOG MONTHLY DATA" button to input the numbers.
 
 ### Feature 2: Rebalancing Calculator
 A tool to manage the manual 50/50 split on eToro.
