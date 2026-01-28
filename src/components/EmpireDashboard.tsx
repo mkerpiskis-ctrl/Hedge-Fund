@@ -388,12 +388,35 @@ export default function EmpireDashboard() {
                                 <div className="grid grid-cols-2 gap-4">
                                     <div>
                                         <label className="block text-[10px] uppercase text-slate-500 font-bold mb-1">FX Rate (EUR/USD)</label>
-                                        <input
-                                            type="number" step="0.01"
-                                            value={logForm.fxRate}
-                                            onChange={e => setLogForm({ ...logForm, fxRate: e.target.value })}
-                                            className="w-full bg-slate-800 border-slate-700 rounded text-sm p-2 text-slate-200"
-                                        />
+                                        <div className="flex space-x-2">
+                                            <input
+                                                type="number" step="0.01"
+                                                value={logForm.fxRate}
+                                                onChange={e => setLogForm({ ...logForm, fxRate: e.target.value })}
+                                                className="w-full bg-slate-800 border-slate-700 rounded text-sm p-2 text-slate-200"
+                                            />
+                                            <button
+                                                onClick={async () => {
+                                                    try {
+                                                        const res = await fetch('https://api.allorigins.win/get?url=' + encodeURIComponent('https://query1.finance.yahoo.com/v8/finance/chart/EURUSD=X?interval=1d&range=1d'));
+                                                        const data = await res.json();
+                                                        const json = JSON.parse(data.contents);
+                                                        const rate = json.chart.result[0].meta.regularMarketPrice;
+                                                        if (rate) {
+                                                            setLogForm(prev => ({ ...prev, fxRate: rate.toFixed(4) }));
+                                                        } else {
+                                                            alert('Could not fetch rate automatically.');
+                                                        }
+                                                    } catch (err) {
+                                                        console.error(err);
+                                                        alert('Error fetching rate.');
+                                                    }
+                                                }}
+                                                className="px-2 py-1 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded text-[10px] font-bold"
+                                            >
+                                                GET
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
 
@@ -466,59 +489,62 @@ export default function EmpireDashboard() {
                                         </tr>
                                     </thead>
                                     <tbody className="text-sm text-slate-300">
-                                        {businessData.map((row, idx) => (
-                                            <tr key={idx} className="border-b border-slate-800/50 hover:bg-slate-800/30">
-                                                <td className="p-3">
-                                                    <input
-                                                        type="date"
-                                                        value={row.month}
-                                                        onChange={(e) => handleUpdateBizEntry(idx, 'month', e.target.value)}
-                                                        className="bg-transparent border border-slate-700 rounded px-2 py-1 w-32 focus:border-amber-500 outline-none"
-                                                    />
-                                                </td>
-                                                <td className="p-3">
-                                                    <input
-                                                        type="number"
-                                                        value={row.c2Subs}
-                                                        onChange={(e) => handleUpdateBizEntry(idx, 'c2Subs', e.target.value)}
-                                                        className="bg-transparent border border-slate-700 rounded px-2 py-1 w-20 focus:border-amber-500 outline-none"
-                                                    />
-                                                </td>
-                                                <td className="p-3">
-                                                    <input
-                                                        type="number"
-                                                        value={row.etoroCopiers}
-                                                        onChange={(e) => handleUpdateBizEntry(idx, 'etoroCopiers', e.target.value)}
-                                                        className="bg-transparent border border-slate-700 rounded px-2 py-1 w-20 focus:border-amber-500 outline-none"
-                                                    />
-                                                </td>
-                                                <td className="p-3">
-                                                    <input
-                                                        type="number"
-                                                        value={row.auc}
-                                                        onChange={(e) => handleUpdateBizEntry(idx, 'auc', e.target.value)}
-                                                        className="bg-transparent border border-slate-700 rounded px-2 py-1 w-24 focus:border-amber-500 outline-none"
-                                                    />
-                                                </td>
-                                                <td className="p-3">
-                                                    <input
-                                                        type="number"
-                                                        value={row.netIncome}
-                                                        onChange={(e) => handleUpdateBizEntry(idx, 'netIncome', e.target.value)}
-                                                        className="bg-transparent border border-slate-700 rounded px-2 py-1 w-24 border-emerald-500/30 text-emerald-400 focus:border-emerald-500 outline-none"
-                                                    />
-                                                </td>
-                                                <td className="p-3">
-                                                    <button
-                                                        onClick={() => handleDeleteBizEntry(idx)}
-                                                        className="text-rose-500 hover:text-rose-400 p-1"
-                                                        title="Delete Entry"
-                                                    >
-                                                        ✕
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        ))}
+                                        {[...businessData].reverse().map((row, rIdx) => {
+                                            const idx = businessData.length - 1 - rIdx;
+                                            return (
+                                                <tr key={idx} className="border-b border-slate-800/50 hover:bg-slate-800/30">
+                                                    <td className="p-3">
+                                                        <input
+                                                            type="date"
+                                                            value={row.month}
+                                                            onChange={(e) => handleUpdateBizEntry(idx, 'month', e.target.value)}
+                                                            className="bg-transparent border border-slate-700 rounded px-2 py-1 w-32 focus:border-amber-500 outline-none"
+                                                        />
+                                                    </td>
+                                                    <td className="p-3">
+                                                        <input
+                                                            type="number"
+                                                            value={row.c2Subs}
+                                                            onChange={(e) => handleUpdateBizEntry(idx, 'c2Subs', e.target.value)}
+                                                            className="bg-transparent border border-slate-700 rounded px-2 py-1 w-20 focus:border-amber-500 outline-none"
+                                                        />
+                                                    </td>
+                                                    <td className="p-3">
+                                                        <input
+                                                            type="number"
+                                                            value={row.etoroCopiers}
+                                                            onChange={(e) => handleUpdateBizEntry(idx, 'etoroCopiers', e.target.value)}
+                                                            className="bg-transparent border border-slate-700 rounded px-2 py-1 w-20 focus:border-amber-500 outline-none"
+                                                        />
+                                                    </td>
+                                                    <td className="p-3">
+                                                        <input
+                                                            type="number"
+                                                            value={row.auc}
+                                                            onChange={(e) => handleUpdateBizEntry(idx, 'auc', e.target.value)}
+                                                            className="bg-transparent border border-slate-700 rounded px-2 py-1 w-24 focus:border-amber-500 outline-none"
+                                                        />
+                                                    </td>
+                                                    <td className="p-3">
+                                                        <input
+                                                            type="number"
+                                                            value={row.netIncome}
+                                                            onChange={(e) => handleUpdateBizEntry(idx, 'netIncome', e.target.value)}
+                                                            className="bg-transparent border border-slate-700 rounded px-2 py-1 w-24 border-emerald-500/30 text-emerald-400 focus:border-emerald-500 outline-none"
+                                                        />
+                                                    </td>
+                                                    <td className="p-3">
+                                                        <button
+                                                            onClick={() => handleDeleteBizEntry(idx)}
+                                                            className="text-rose-500 hover:text-rose-400 p-1"
+                                                            title="Delete Entry"
+                                                        >
+                                                            ✕
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
                                     </tbody>
                                 </table>
                             </div>
