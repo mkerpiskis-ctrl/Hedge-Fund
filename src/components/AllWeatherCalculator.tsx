@@ -306,6 +306,16 @@ const AllWeatherCalculator: React.FC = () => {
                                     <span className={isRefreshing ? "animate-spin" : ""}>⟳</span>
                                     <span>{isRefreshing ? 'UPDATING...' : 'UPDATE LIVE PRICES'}</span>
                                 </button>
+                                <button
+                                    onClick={() => {
+                                        localStorage.removeItem('aw_assets_v3');
+                                        window.location.reload();
+                                    }}
+                                    className="text-[9px] text-slate-600 hover:text-rose-400 font-mono transition-colors"
+                                    title="Force Reset Cached Data"
+                                >
+                                    v1.1 (RESET)
+                                </button>
                             </div>
                         </div>
                         <table className="w-full text-left border-collapse">
