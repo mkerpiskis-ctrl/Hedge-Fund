@@ -8,6 +8,7 @@ interface Asset {
     price: number | string;
     averagePrice: number | string;
     units: number | string;
+    currency?: string;
 }
 
 interface ResultRow {
@@ -35,12 +36,12 @@ const AllWeatherCalculator: React.FC = () => {
             return JSON.parse(saved);
         }
         return [
-            { id: 'nasdaq', name: 'NASDAQ 100 | QQQ', ticker: 'CNDX.L', targetWeight: 30, price: '', averagePrice: '', units: '' },
-            { id: 'world_ex_usa', name: 'All World - Ex USA | EFA', ticker: 'WEXU.DE', targetWeight: 20, price: '', averagePrice: '', units: '' },
-            { id: 'gold', name: 'Gold | GLD', ticker: 'IGLN.L', targetWeight: 20, price: '', averagePrice: '', units: '' },
-            { id: 'treasuries', name: 'Treasuries | TLT', ticker: 'DTLA.L', targetWeight: 10, price: '', averagePrice: '', units: '' },
-            { id: 'commodities', name: 'Commodities | PDBC', ticker: 'ETL2.DE', targetWeight: 10, price: '', averagePrice: '', units: '' },
-            { id: 'bitcoin', name: 'Bitcoin | IBIT', ticker: 'BTC', targetWeight: 10, price: '', averagePrice: '', units: '' },
+            { id: 'nasdaq', name: 'NASDAQ 100 | CNDX.L', ticker: 'CNDX.L', targetWeight: 30, price: '', averagePrice: '', units: '', currency: '' },
+            { id: 'world_ex_usa', name: 'All World - Ex USA | WEXU.DE', ticker: 'WEXU.DE', targetWeight: 20, price: '', averagePrice: '', units: '', currency: '' },
+            { id: 'gold', name: 'Gold | IGLN.L', ticker: 'IGLN.L', targetWeight: 20, price: '', averagePrice: '', units: '', currency: '' },
+            { id: 'treasuries', name: 'Treasuries | DTLA.L', ticker: 'DTLA.L', targetWeight: 10, price: '', averagePrice: '', units: '', currency: '' },
+            { id: 'commodities', name: 'Commodities | ETL2.DE', ticker: 'ETL2.DE', targetWeight: 10, price: '', averagePrice: '', units: '', currency: '' },
+            { id: 'bitcoin', name: 'Bitcoin | IBIT', ticker: 'BTC', targetWeight: 10, price: '', averagePrice: '', units: '', currency: '' },
         ];
     });
 
@@ -76,22 +77,53 @@ const AllWeatherCalculator: React.FC = () => {
         setIsRefreshing(true);
         const newAssets = [...assets];
 
+        // Fetch FX rates first
+        let eurUsd = 1.05; // fallback
+        let gbpUsd = 1.25; // fallback
+        try {
+            const fxRes = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent('https://query1.finance.yahoo.com/v8/finance/chart/EURUSD=X?symbol=EURUSD=X&symbol=GBPUSD=X&interval=1d&range=1d')}`);
+            // Note: Multi-symbol fetch is tricky with this endpoint structure, better to fetch individually or use the chart endpoint for one and hope. 
+            // Actually, let's just fetch individually to be safe.
+            const resEUR = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent('https://query1.finance.yahoo.com/v8/finance/chart/EURUSD=X?interval=1d&range=1d')}`);
+            const dataEUR = await resEUR.json();
+            const jsonEUR = JSON.parse(dataEUR.contents);
+            eurUsd = jsonEUR.chart.result[0].meta.regularMarketPrice || eurUsd;
+
+            const resGBP = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent('https://query1.finance.yahoo.com/v8/finance/chart/GBPUSD=X?interval=1d&range=1d')}`);
+            const dataGBP = await resGBP.json();
+            const jsonGBP = JSON.parse(dataGBP.contents);
+            gbpUsd = jsonGBP.chart.result[0].meta.regularMarketPrice || gbpUsd;
+        } catch (e) {
+            console.error("FX Fetch Error", e);
+        }
+
         for (let i = 0; i < newAssets.length; i++) {
             const asset = newAssets[i];
             let listTicker = asset.ticker;
-            // Yahoo Finance typically needs BTC-USD for Bitcoin
             if (listTicker === 'BTC') listTicker = 'BTC-USD';
 
             try {
-                // Use allorigins as a CORS proxy
                 const response = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(`https://query1.finance.yahoo.com/v8/finance/chart/${listTicker}?interval=1d&range=1d`)}`);
                 const data = await response.json();
                 if (data.contents) {
                     const yahooData = JSON.parse(data.contents);
                     const meta = yahooData.chart?.result?.[0]?.meta;
-                    const price = meta?.regularMarketPrice || meta?.chartPreviousClose || meta?.previousClose;
+                    let price = meta?.regularMarketPrice || meta?.chartPreviousClose || meta?.previousClose;
+                    const currency = meta?.currency;
+
+                    newAssets[i].currency = currency; // Store detected currency
+
                     if (price) {
-                        newAssets[i].price = price;
+                        // Auto-convert to USD
+                        if (currency === 'EUR') {
+                            price = price * eurUsd;
+                        } else if (currency === 'GBP') {
+                            price = price * gbpUsd;
+                        } else if (currency === 'GBp') { // Pence
+                            price = (price / 100) * gbpUsd;
+                        }
+
+                        newAssets[i].price = price.toFixed(4); // Store as string for input
                     }
                 }
             } catch (error) {
@@ -274,7 +306,7 @@ const AllWeatherCalculator: React.FC = () => {
                             <thead className="bg-slate-900/50 text-[10px] uppercase text-slate-500 font-semibold">
                                 <tr>
                                     <th className="p-2 pl-3">Asset</th>
-                                    <th className="p-2 text-right">Last Price</th>
+                                    <th className="p-2 text-right">Last Price (USD)</th>
                                     <th className="p-2 text-right">Avg Price</th>
                                     <th className="p-2 text-right">Units</th>
                                 </tr>
@@ -290,14 +322,17 @@ const AllWeatherCalculator: React.FC = () => {
                                             </div>
                                         </td>
                                         <td className="p-2 text-right">
-                                            <input
-                                                type="number"
-                                                placeholder="0.00"
-                                                value={asset.price}
-                                                onChange={(e) => handleInputChange(asset.id, 'price', e.target.value)}
-                                                className="glass-input w-20 text-right text-xs py-0.5"
-                                                tabIndex={idx * 3 + 2}
-                                            />
+                                            <div className="flex justify-end items-center space-x-2">
+                                                {asset.currency && <span className="text-[9px] text-slate-600 bg-slate-800/50 px-1 rounded">{asset.currency}</span>}
+                                                <input
+                                                    type="number"
+                                                    placeholder="0.00"
+                                                    value={asset.price}
+                                                    onChange={(e) => handleInputChange(asset.id, 'price', e.target.value)}
+                                                    className="glass-input w-20 text-right text-xs py-0.5"
+                                                    tabIndex={idx * 3 + 2}
+                                                />
+                                            </div>
                                         </td>
                                         <td className="p-2 text-right">
                                             <input

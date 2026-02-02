@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Test eToro Fetch</title>
+</head>
+
+<body>
+    <h1>eToro Fetch Test</h1>
+    <div id="output">Running...</div>
+    <script>
+        async function run() {
+            const slugs = ['bitcoin', 'nsdq100', 'gold', 'apple']; // Common slugs
+            const results = {};
+
+            for (const slug of slugs) {
+                try {
+                    const url = 'https://www.etoro.com/api/markets/instrument-by-slug/' + slug;
+                    const proxyUrl = 'https://api.allorigins.win/get?url=' + encodeURIComponent(url);
+
+                    const res = await fetch(proxyUrl);
+                    const data = await res.json();
+
+                    if (data.contents) {
+                        const json = JSON.parse(data.contents);
+                        results[slug] = {
+                            success: true,
+                            price: json.InstrumentDisplayDatas[0].Rate,
+                            name: json.InstrumentDisplayDatas[0].InstrumentDisplayName,
+                            id: json.InstrumentDisplayDatas[0].InstrumentID
+                        };
+                    }
+                } catch (e) {
+                    results[slug] = { success: false, error: e.toString() };
+                }
+            }
+
+            document.getElementById('output').innerText = JSON.stringify(results, null, 2);
+        }
+        run();
+    </script>
+</body>
+
+</html>
