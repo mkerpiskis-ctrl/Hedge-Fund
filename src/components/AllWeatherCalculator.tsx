@@ -103,7 +103,8 @@ const AllWeatherCalculator: React.FC = () => {
             if (listTicker === 'BTC') listTicker = 'BTC-USD';
 
             try {
-                const response = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(`https://query1.finance.yahoo.com/v8/finance/chart/${listTicker}?interval=1d&range=1d`)}`);
+                const timestamp = new Date().getTime();
+                const response = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(`https://query1.finance.yahoo.com/v8/finance/chart/${listTicker}?interval=1d&range=1d`)}&timestamp=${timestamp}`);
                 const data = await response.json();
                 if (data.contents) {
                     const yahooData = JSON.parse(data.contents);
