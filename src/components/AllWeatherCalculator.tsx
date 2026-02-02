@@ -109,7 +109,12 @@ const AllWeatherCalculator: React.FC = () => {
                     const yahooData = JSON.parse(data.contents);
                     const meta = yahooData.chart?.result?.[0]?.meta;
                     let price = meta?.regularMarketPrice || meta?.chartPreviousClose || meta?.previousClose;
-                    const currency = meta?.currency;
+                    let currency = meta?.currency;
+
+                    // Manual overrides for known USD tickers on LSE/Xetra
+                    if (['IGLN.L', 'CNDX.L', 'DTLA.L', 'WEXU.DE'].includes(asset.ticker)) {
+                        currency = 'USD';
+                    }
 
                     newAssets[i].currency = currency; // Store detected currency
 
