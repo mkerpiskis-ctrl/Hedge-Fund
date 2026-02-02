@@ -81,7 +81,7 @@ const AllWeatherCalculator: React.FC = () => {
         let eurUsd = 1.05; // fallback
         let gbpUsd = 1.25; // fallback
         try {
-            const fxRes = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent('https://query1.finance.yahoo.com/v8/finance/chart/EURUSD=X?symbol=EURUSD=X&symbol=GBPUSD=X&interval=1d&range=1d')}`);
+
             // Note: Multi-symbol fetch is tricky with this endpoint structure, better to fetch individually or use the chart endpoint for one and hope. 
             // Actually, let's just fetch individually to be safe.
             const resEUR = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent('https://query1.finance.yahoo.com/v8/finance/chart/EURUSD=X?interval=1d&range=1d')}`);
