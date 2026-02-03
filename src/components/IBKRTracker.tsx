@@ -715,41 +715,62 @@ export default function IBKRTracker() {
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-700">
                     <p className="text-xs text-slate-500 uppercase tracking-wide">Cash Balance</p>
-                    <p className="text-2xl font-bold text-slate-100 mt-1">${cashBalance.toLocaleString()}</p>
+                    <p className="text-2xl font-bold text-slate-100 mt-1">
+                        ${(twsConnected && selectedAccount !== 'ALL' && displayedTotals
+                            ? displayedTotals.totalCashValue
+                            : cashBalance
+                        ).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                    </p>
                 </div>
                 <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-700">
                     <p className="text-xs text-slate-500 uppercase tracking-wide">Positions Value</p>
-                    <p className="text-2xl font-bold text-slate-100 mt-1">${totalMarketValue.toLocaleString()}</p>
+                    <p className="text-2xl font-bold text-slate-100 mt-1">
+                        ${(twsConnected && selectedAccount !== 'ALL' && displayedTotals
+                            ? (displayedTotals.netLiquidation - displayedTotals.totalCashValue)
+                            : totalMarketValue
+                        ).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                    </p>
                 </div>
                 <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-700">
                     <p className="text-xs text-slate-500 uppercase tracking-wide">Total Equity</p>
-                    <p className="text-2xl font-bold text-amber-400 mt-1">${totalEquity.toLocaleString()}</p>
+                    <p className={`text-2xl font-bold mt-1 ${(twsConnected && selectedAccount !== 'ALL' && displayedTotals ? displayedTotals.netLiquidation : totalEquity) >= 100000 ? 'text-amber-400' : 'text-amber-400'}`}>
+                        ${(twsConnected && selectedAccount !== 'ALL' && displayedTotals
+                            ? displayedTotals.netLiquidation
+                            : totalEquity
+                        ).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                    </p>
                 </div>
                 <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-700">
                     <p className="text-xs text-slate-500 uppercase tracking-wide">Unrealized P&L</p>
-                    <p className={`text-2xl font-bold mt-1 ${totalPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {totalPnL >= 0 ? '+' : ''}{totalPnL.toLocaleString()}
+                    <p className={`text-2xl font-bold mt-1 ${(twsConnected && selectedAccount !== 'ALL' && displayedTotals ? displayedTotals.unrealizedPnL : totalPnL) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {(twsConnected && selectedAccount !== 'ALL' && displayedTotals ? displayedTotals.unrealizedPnL : totalPnL) >= 0 ? '+' : ''}
+                        ${(twsConnected && selectedAccount !== 'ALL' && displayedTotals
+                            ? displayedTotals.unrealizedPnL
+                            : totalPnL
+                        ).toLocaleString(undefined, { maximumFractionDigits: 0 })}
                     </p>
                 </div>
             </div>
 
-            {/* Cash Balance Input */}
-            <div className="bg-slate-800/30 rounded-lg p-4 border border-slate-700">
-                <label className="block text-xs text-slate-500 uppercase tracking-wide mb-2">Set Cash Balance</label>
-                <div className="flex items-center space-x-2">
-                    <span className="text-slate-400">$</span>
-                    <input
-                        type="number"
-                        value={cashBalance}
-                        onChange={(e) => {
-                            const val = parseFloat(e.target.value) || 0;
-                            setCashBalance(val);
-                            saveData(trades, positions, val);
-                        }}
-                        className="bg-slate-700 text-slate-100 px-3 py-2 rounded-lg w-48 text-right"
-                    />
+            {/* Cash Balance Input (Manual Mode Only) */}
+            {(!twsConnected || selectedAccount === 'ALL') && (
+                <div className="bg-slate-800/30 rounded-lg p-4 border border-slate-700">
+                    <label className="block text-xs text-slate-500 uppercase tracking-wide mb-2">Set Cash Balance</label>
+                    <div className="flex items-center space-x-2">
+                        <span className="text-slate-400">$</span>
+                        <input
+                            type="number"
+                            value={cashBalance}
+                            onChange={(e) => {
+                                const val = parseFloat(e.target.value) || 0;
+                                setCashBalance(val);
+                                saveData(trades, positions, val);
+                            }}
+                            className="bg-slate-700 text-slate-100 px-3 py-2 rounded-lg w-48 text-right"
+                        />
+                    </div>
                 </div>
-            </div>
+            )}
 
             {/* CSV Upload */}
             <div className="bg-slate-800/30 rounded-lg p-6 border border-dashed border-slate-600 text-center relative">
