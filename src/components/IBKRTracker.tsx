@@ -34,6 +34,8 @@ export default function IBKRTracker() {
     const [isLoading, setIsLoading] = useState(false);
     const [csvPreview, setCsvPreview] = useState<Trade[] | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [editingTradeId, setEditingTradeId] = useState<string | null>(null);
+    const [editingPositionSymbol, setEditingPositionSymbol] = useState<string | null>(null);
 
     // Load data from localStorage with migration for old format
     useEffect(() => {
@@ -213,6 +215,64 @@ export default function IBKRTracker() {
 
         saveData(newTrades, newPositions, cashBalance);
         setCsvPreview(null);
+    };
+
+    // Delete a single trade
+    const deleteTrade = (tradeId: string) => {
+        const newTrades = trades.filter(t => t.id !== tradeId);
+        setTrades(newTrades);
+        const newPositions = calculatePositions(newTrades);
+        setPositions(newPositions);
+        saveData(newTrades, newPositions, cashBalance);
+    };
+
+    // Update a trade (quantity, price)
+    const updateTrade = (tradeId: string, updates: Partial<Trade>) => {
+        const newTrades = trades.map(t => {
+            if (t.id === tradeId) {
+                const updated = { ...t, ...updates };
+                updated.totalValue = updated.quantity * updated.price;
+                return updated;
+            }
+            return t;
+        });
+        setTrades(newTrades);
+        const newPositions = calculatePositions(newTrades);
+        setPositions(newPositions);
+        saveData(newTrades, newPositions, cashBalance);
+        setEditingTradeId(null);
+    };
+
+    // Delete a position (removes all trades for that symbol)
+    const deletePosition = (symbol: string) => {
+        const newTrades = trades.filter(t => t.symbol !== symbol);
+        setTrades(newTrades);
+        const newPositions = calculatePositions(newTrades);
+        setPositions(newPositions);
+        saveData(newTrades, newPositions, cashBalance);
+    };
+
+    // Update a position (updates avgCost which affects display)
+    const updatePosition = (symbol: string, updates: Partial<Position>) => {
+        const newPositions = positions.map(p => {
+            if (p.symbol === symbol) {
+                return { ...p, ...updates };
+            }
+            return p;
+        });
+        setPositions(newPositions);
+        saveData(trades, newPositions, cashBalance);
+        setEditingPositionSymbol(null);
+    };
+
+    // Clear all data
+    const clearAllData = () => {
+        if (confirm('Are you sure you want to delete ALL trades and positions?')) {
+            setTrades([]);
+            setPositions([]);
+            setCashBalance(0);
+            localStorage.removeItem(STORAGE_KEY);
+        }
     };
 
     // Calculate positions from all trades - CONSOLIDATE same symbols across systems
@@ -434,6 +494,7 @@ export default function IBKRTracker() {
                                     <th className="text-right py-2">Current</th>
                                     <th className="text-right py-2">Value</th>
                                     <th className="text-right py-2">P&L</th>
+                                    <th className="text-center py-2">Actions</th>
                                 </tr>
                             </thead>
                             <tbody className="text-slate-300">
@@ -451,8 +512,31 @@ export default function IBKRTracker() {
                                                 </span>
                                             )}
                                         </td>
-                                        <td className="py-2 text-right">{p.quantity}</td>
-                                        <td className="py-2 text-right">${p.avgCost.toFixed(2)}</td>
+                                        <td className="py-2 text-right">
+                                            {editingPositionSymbol === p.symbol ? (
+                                                <input
+                                                    type="number"
+                                                    defaultValue={p.quantity}
+                                                    className="w-16 bg-slate-700 text-slate-100 px-1 py-0.5 rounded text-right text-xs"
+                                                    onBlur={(e) => updatePosition(p.symbol, { quantity: parseFloat(e.target.value) || 0 })}
+                                                    autoFocus
+                                                />
+                                            ) : (
+                                                <span onClick={() => setEditingPositionSymbol(p.symbol)} className="cursor-pointer hover:text-amber-400">{p.quantity.toFixed(2)}</span>
+                                            )}
+                                        </td>
+                                        <td className="py-2 text-right">
+                                            {editingPositionSymbol === p.symbol ? (
+                                                <input
+                                                    type="number"
+                                                    defaultValue={p.avgCost}
+                                                    className="w-20 bg-slate-700 text-slate-100 px-1 py-0.5 rounded text-right text-xs"
+                                                    onBlur={(e) => updatePosition(p.symbol, { avgCost: parseFloat(e.target.value) || 0 })}
+                                                />
+                                            ) : (
+                                                <span onClick={() => setEditingPositionSymbol(p.symbol)} className="cursor-pointer hover:text-amber-400">${p.avgCost.toFixed(2)}</span>
+                                            )}
+                                        </td>
                                         <td className="py-2 text-right">{p.currentPrice ? `$${p.currentPrice.toFixed(2)}` : '—'}</td>
                                         <td className="py-2 text-right">{p.marketValue ? `$${p.marketValue.toLocaleString()}` : '—'}</td>
                                         <td className={`py-2 text-right font-bold ${(p.pnl ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
@@ -460,6 +544,26 @@ export default function IBKRTracker() {
                                             {p.pnlPercent !== null && (
                                                 <span className="text-slate-500 ml-1">({p.pnlPercent >= 0 ? '+' : ''}{p.pnlPercent.toFixed(1)}%)</span>
                                             )}
+                                        </td>
+                                        <td className="py-2 text-center">
+                                            <button
+                                                onClick={() => setEditingPositionSymbol(editingPositionSymbol === p.symbol ? null : p.symbol)}
+                                                className="text-slate-500 hover:text-amber-400 mr-2"
+                                                title="Edit"
+                                            >
+                                                ✏️
+                                            </button>
+                                            <button
+                                                onClick={() => {
+                                                    if (confirm(`Delete position ${p.symbol}?`)) {
+                                                        deletePosition(p.symbol);
+                                                    }
+                                                }}
+                                                className="text-slate-500 hover:text-rose-400"
+                                                title="Delete"
+                                            >
+                                                🗑️
+                                            </button>
                                         </td>
                                     </tr>
                                 ))}
@@ -474,7 +578,15 @@ export default function IBKRTracker() {
                 <div className="bg-slate-800/30 rounded-lg p-4 border border-slate-700">
                     <div className="flex items-center justify-between mb-3">
                         <h4 className="text-slate-300 font-semibold">Trade History</h4>
-                        <span className="text-xs text-slate-500">{filteredTrades.length} trades</span>
+                        <div className="flex items-center space-x-3">
+                            <span className="text-xs text-slate-500">{filteredTrades.length} trades</span>
+                            <button
+                                onClick={clearAllData}
+                                className="px-2 py-1 text-[10px] bg-rose-600/20 text-rose-400 rounded hover:bg-rose-600/30 border border-rose-600/30"
+                            >
+                                Clear All
+                            </button>
+                        </div>
                     </div>
                     <div className="max-h-64 overflow-y-auto">
                         <table className="w-full text-xs">
@@ -487,6 +599,7 @@ export default function IBKRTracker() {
                                     <th className="text-right py-2">Qty</th>
                                     <th className="text-right py-2">Price</th>
                                     <th className="text-right py-2">Total</th>
+                                    <th className="text-center py-2">Del</th>
                                 </tr>
                             </thead>
                             <tbody className="text-slate-300">
@@ -501,9 +614,41 @@ export default function IBKRTracker() {
                                         <td className={`py-2 font-bold ${t.action === 'BUY' ? 'text-emerald-400' : 'text-rose-400'}`}>
                                             {t.action}
                                         </td>
-                                        <td className="py-2 text-right">{t.quantity}</td>
-                                        <td className="py-2 text-right">${t.price.toFixed(2)}</td>
+                                        <td className="py-2 text-right">
+                                            {editingTradeId === t.id ? (
+                                                <input
+                                                    type="number"
+                                                    defaultValue={t.quantity}
+                                                    className="w-16 bg-slate-700 text-slate-100 px-1 py-0.5 rounded text-right text-xs"
+                                                    onBlur={(e) => updateTrade(t.id, { quantity: parseFloat(e.target.value) || 0 })}
+                                                    autoFocus
+                                                />
+                                            ) : (
+                                                <span onClick={() => setEditingTradeId(t.id)} className="cursor-pointer hover:text-amber-400">{t.quantity.toFixed(2)}</span>
+                                            )}
+                                        </td>
+                                        <td className="py-2 text-right">
+                                            {editingTradeId === t.id ? (
+                                                <input
+                                                    type="number"
+                                                    defaultValue={t.price}
+                                                    className="w-20 bg-slate-700 text-slate-100 px-1 py-0.5 rounded text-right text-xs"
+                                                    onBlur={(e) => updateTrade(t.id, { price: parseFloat(e.target.value) || 0 })}
+                                                />
+                                            ) : (
+                                                <span onClick={() => setEditingTradeId(t.id)} className="cursor-pointer hover:text-amber-400">${t.price.toFixed(2)}</span>
+                                            )}
+                                        </td>
                                         <td className="py-2 text-right">${t.totalValue.toLocaleString()}</td>
+                                        <td className="py-2 text-center">
+                                            <button
+                                                onClick={() => deleteTrade(t.id)}
+                                                className="text-slate-500 hover:text-rose-400"
+                                                title="Delete trade"
+                                            >
+                                                ✕
+                                            </button>
+                                        </td>
                                     </tr>
                                 ))}
                             </tbody>
