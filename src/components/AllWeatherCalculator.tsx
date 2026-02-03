@@ -113,19 +113,28 @@ const AllWeatherCalculator: React.FC = () => {
         }
 
         // Fetch Live
-        // v1.4.1: Using /get endpoint with cache-busting timestamp to force fresh data
-        // The proxy was caching stale 4-day data, missing the latest 90.42 value
-        const timestamp = Date.now();
-        const targetUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=5d`;
-        const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}&_=${timestamp}`;
+        // v1.5.0: Using custom Vercel API for IGLN (bypasses allorigins cache issues)
+        // For other tickers, still use allorigins as fallback
+        let yahooData;
 
-        const res = await fetch(proxyUrl);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (ticker.includes('IGLN') || ticker === 'IGLN.L') {
+            // Use our own proxy to bypass third-party cache
+            const apiUrl = `/api/yahoo?symbol=${encodeURIComponent(ticker)}&range=5d&_=${Date.now()}`;
+            const res = await fetch(apiUrl);
+            if (!res.ok) throw new Error(`API returned ${res.status}`);
+            yahooData = await res.json();
+        } else {
+            // Use allorigins for other tickers (works fine for them)
+            const timestamp = Date.now();
+            const targetUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=5d`;
+            const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}&_=${timestamp}`;
+            const res = await fetch(proxyUrl);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const wrapper = await res.json();
+            if (!wrapper.contents) throw new Error('No contents in proxy response');
+            yahooData = JSON.parse(wrapper.contents);
+        }
 
-        const wrapper = await res.json();
-        if (!wrapper.contents) throw new Error('No contents in proxy response');
-
-        const yahooData = JSON.parse(wrapper.contents);
         const result = yahooData.chart?.result?.[0];
         const meta = result?.meta;
 
