@@ -1095,8 +1095,8 @@ export default function IBKRTracker() {
                                     <th className="text-left py-2">System</th>
                                     <th className="text-right py-2">Qty</th>
                                     <th className="text-right py-2">Avg Cost</th>
+                                    <th className="text-right py-2">Cost Basis</th>
                                     <th className="text-right py-2">Current</th>
-                                    <th className="text-right py-2">Value</th>
                                     <th className="text-right py-2">P&L</th>
                                     <th className="text-center py-2">Actions</th>
                                 </tr>
@@ -1153,11 +1153,11 @@ export default function IBKRTracker() {
                                                 )
                                             )}
                                         </td>
-                                        <td className="py-2 text-right text-slate-400">
-                                            ${p.currentPrice ? p.currentPrice.toFixed(2) : '-'}
+                                        <td className="py-2 text-right font-medium text-slate-400">
+                                            ${(p.quantity * p.avgCost).toLocaleString(undefined, { maximumFractionDigits: 0 })}
                                         </td>
-                                        <td className="py-2 text-right font-medium">
-                                            ${p.marketValue ? p.marketValue.toLocaleString(undefined, { maximumFractionDigits: 0 }) : '-'}
+                                        <td className="py-2 text-right">
+                                            ${p.currentPrice ? p.currentPrice.toFixed(2) : '-'}
                                         </td>
                                         <td className={`py-2 text-right font-bold ${(p.pnl || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'
                                             }`}>
