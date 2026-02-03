@@ -143,7 +143,15 @@ const AllWeatherCalculator: React.FC = () => {
 
                     if (tick.includes('IGLN') || asset.id === 'gold') {
                         if (price) {
-                            // removed math hack - using true source now
+                            // Check if AdjClose logic failed (price still inflated > 95)
+                            // v1.3.0 HYBRID FIX: If clean source failed, force math correction.
+                            if (price > 95) {
+                                const anomalyFactor = 1.083;
+                                const original = price;
+                                price = price / anomalyFactor;
+                                log(`IGLN MATH FALLBACK: ${original.toFixed(4)} -> ${price.toFixed(4)} (Factor ${anomalyFactor})`);
+                            }
+
                             newAssets[i].currency = 'USD'; // Force display as USD
                             newAssets[i].price = price.toFixed(4);
                             newAssets[i].isLocked = true; // Visual indicator
