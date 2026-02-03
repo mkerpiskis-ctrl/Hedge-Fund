@@ -685,16 +685,51 @@ export default function IBKRTracker() {
 
     // Parse IBKR Flex Query CSV for Trade History
     const parseFlexQueryCSV = (csvContent: string): Trade[] => {
+        console.log('parseFlexQueryCSV called');
         const lines = csvContent.split('\n').filter(line => line.trim());
-        if (lines.length < 2) return [];
+        console.log('Total lines:', lines.length);
+
+        if (lines.length < 2) {
+            console.log('Not enough lines');
+            return [];
+        }
+
+        console.log('Header:', lines[0]);
+        console.log('First data line:', lines[1]);
 
         const trades: Trade[] = [];
 
         // Skip header row (index 0)
         for (let i = 1; i < lines.length; i++) {
-            // Parse CSV with quotes
-            const cols = lines[i].match(/("([^"]*)"|[^,]*)/g)?.map(c => c.replace(/^"|"$/g, '').trim()) || [];
-            if (cols.length < 8) continue;
+            const line = lines[i];
+
+            // Parse CSV - split by comma but handle quoted values
+            // Format: "value1","value2","value3",...
+            const cols: string[] = [];
+            let current = '';
+            let inQuotes = false;
+
+            for (let j = 0; j < line.length; j++) {
+                const char = line[j];
+                if (char === '"') {
+                    inQuotes = !inQuotes;
+                } else if (char === ',' && !inQuotes) {
+                    cols.push(current.trim());
+                    current = '';
+                } else {
+                    current += char;
+                }
+            }
+            cols.push(current.trim()); // Push last column
+
+            if (i <= 3) {
+                console.log(`Line ${i} columns:`, cols.slice(0, 6));
+            }
+
+            if (cols.length < 6) {
+                console.log(`Line ${i}: Not enough columns (${cols.length})`);
+                continue;
+            }
 
             const account = cols[0] || '';
             const symbol = cols[1] || '';
@@ -704,8 +739,14 @@ export default function IBKRTracker() {
             const price = parseFloat(cols[5]) || 0;
 
             // Skip MULTI (aggregate) rows and forex pairs
-            if (tradeDateRaw === 'MULTI') continue;
-            if (symbol.includes('.')) continue; // Skip EUR.USD, GBP.USD etc.
+            if (tradeDateRaw === 'MULTI') {
+                if (i <= 5) console.log(`Line ${i}: Skipping MULTI`);
+                continue;
+            }
+            if (symbol.includes('.')) {
+                if (i <= 5) console.log(`Line ${i}: Skipping forex ${symbol}`);
+                continue;
+            }
 
             // Parse date from YYYYMMDD format
             let tradeDate = '';
@@ -714,6 +755,8 @@ export default function IBKRTracker() {
                 const month = tradeDateRaw.substring(4, 6);
                 const day = tradeDateRaw.substring(6, 8);
                 tradeDate = `${year}-${month}-${day}`;
+            } else {
+                if (i <= 5) console.log(`Line ${i}: Invalid date format: ${tradeDateRaw}`);
             }
 
             // Determine action
@@ -738,9 +781,12 @@ export default function IBKRTracker() {
 
             if (trade.symbol && trade.quantity > 0 && trade.date) {
                 trades.push(trade);
+            } else {
+                if (i <= 5) console.log(`Line ${i}: Invalid trade - symbol:${trade.symbol}, qty:${trade.quantity}, date:${trade.date}`);
             }
         }
 
+        console.log('Total valid trades:', trades.length);
         return trades;
     };
 
