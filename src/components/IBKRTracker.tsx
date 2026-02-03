@@ -716,7 +716,9 @@ export default function IBKRTracker() {
                         >
                             <option value="ALL">All Accounts</option>
                             {Object.keys(twsAccounts).map(acc => (
-                                <option key={acc} value={acc}>{acc}</option>
+                                <option key={acc} value={acc}>
+                                    {acc === 'U15971587' ? 'Pensijos fondas' : acc === 'U15771225' ? 'MK NDX+RUI' : acc} ({acc})
+                                </option>
                             ))}
                         </select>
 
