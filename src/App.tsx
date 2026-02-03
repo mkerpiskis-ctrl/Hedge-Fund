@@ -4,11 +4,12 @@ import Auth from './components/Auth';
 import EmpireDashboard from './components/EmpireDashboard';
 import AllWeatherCalculator from './components/AllWeatherCalculator';
 import FireTracker from './components/FireTracker';
+import IBKRTracker from './components/IBKRTracker';
 
 function App() {
   const [session, setSession] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'calculators' | 'fireTracker'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'calculators' | 'fireTracker' | 'ibkrTracker'>('dashboard');
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -106,6 +107,18 @@ function App() {
               <div className="absolute bottom-[-5px] left-0 w-full h-0.5 bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.5)]"></div>
             )}
           </button>
+          <button
+            onClick={() => setActiveTab('ibkrTracker')}
+            className={`pb-3 px-2 text-sm font-semibold tracking-wide transition-all relative ${activeTab === 'ibkrTracker'
+              ? 'text-amber-400'
+              : 'text-slate-500 hover:text-slate-300'
+              }`}
+          >
+            IBKR TRADES
+            {activeTab === 'ibkrTracker' && (
+              <div className="absolute bottom-[-5px] left-0 w-full h-0.5 bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.5)]"></div>
+            )}
+          </button>
         </div>
       </div>
 
@@ -146,6 +159,25 @@ function App() {
                 <span className="text-xs text-slate-500 font-mono">2025-2048</span>
               </div>
               <FireTracker />
+            </div>
+          </div>
+        )}
+
+        {/* IBKR TRADE TRACKER TAB */}
+        {activeTab === 'ibkrTracker' && (
+          <div className="animate-fade-in">
+            <div className="premium-card p-6 h-full bg-slate-900/80 backdrop-blur-sm">
+              <div className="flex items-center justify-between mb-6 border-b border-slate-800 pb-4">
+                <div className="flex items-center space-x-3">
+                  <div className="w-8 h-8 rounded-full bg-blue-500/10 flex items-center justify-center border border-blue-500/20">
+                    <span className="text-blue-500 text-lg">📈</span>
+                  </div>
+                  <h2 className="text-lg font-semibold text-slate-200">IBKR Trade Tracker</h2>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-500/10 text-blue-400 border border-blue-500/20">NDX + RUI</span>
+                </div>
+                <span className="text-xs text-slate-500 font-mono">REALTEST</span>
+              </div>
+              <IBKRTracker />
             </div>
           </div>
         )}
