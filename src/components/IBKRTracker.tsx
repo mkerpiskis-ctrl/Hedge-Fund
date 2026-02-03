@@ -56,6 +56,46 @@ interface TWSStatus {
     lastError: { message: string; code: number } | null;
 }
 
+// RealTest Types
+interface RealTestTrade {
+    tradeId: string;
+    strategy: string;
+    symbol: string;
+    side: string;
+    dateIn: string;
+    timeIn: string;
+    qtyIn: number;
+    priceIn: number;
+    dateOut: string;
+    timeOut: string;
+    qtyOut: number;
+    priceOut: number;
+    reason: string;
+    profit: number;
+    size: number;
+    dividends: number;
+    isOpen: boolean; // true if Reason = "end of test"
+}
+
+interface RealTestSyncAnalysis {
+    rtBalance: number;       // RealTest theoretical balance
+    twsBalance: number;      // TWS actual balance
+    rtCash: number;          // RealTest theoretical cash
+    twsCash: number;         // TWS actual cash
+    drift: number;           // TWS - RT difference
+    positionComparison: {
+        symbol: string;
+        rtQty: number;
+        rtCost: number;
+        twsQty: number;
+        twsCost: number;
+        qtyDelta: number;
+        valueDelta: number;
+    }[];
+    recommendedAdjustment: number; // Positive = Deposit, Negative = Withdrawal
+    adjustmentType: 'DEPOSIT' | 'WITHDRAWAL' | 'NONE';
+}
+
 const STORAGE_KEY = 'ibkr_tracker_v1';
 const TWS_BRIDGE_URL = 'http://localhost:3001';
 
@@ -91,6 +131,12 @@ export default function IBKRTracker() {
         price: number;
     }[] | null>(null);
     const [latestPrices, setLatestPrices] = useState<Record<string, number>>({});
+
+    // RealTest Sync State
+    const [realTestTrades, setRealTestTrades] = useState<RealTestTrade[]>([]);
+    const [realTestSyncAnalysis, setRealTestSyncAnalysis] = useState<RealTestSyncAnalysis | null>(null);
+    const [showRealTestSync, setShowRealTestSync] = useState(false);
+    const CASH_BUFFER = 1500; // $1,500 safety buffer
 
     // Load data from localStorage with migration for old format
     useEffect(() => {
@@ -485,6 +531,156 @@ export default function IBKRTracker() {
 
         // Default
         return 'RUI';
+    };
+
+    // Parse RealTest CSV
+    const parseRealTestCSV = (csvContent: string): RealTestTrade[] => {
+        const lines = csvContent.split('\n').filter(line => line.trim());
+        if (lines.length < 2) return [];
+
+        const trades: RealTestTrade[] = [];
+
+        // Skip header row (index 0)
+        for (let i = 1; i < lines.length; i++) {
+            const cols = lines[i].split(',');
+            if (cols.length < 21) continue;
+
+            // Parse profit - handle parentheses for negative values
+            let profitStr = cols[15]?.replace(/[^0-9.-]/g, '') || '0';
+            if (cols[15]?.includes('(')) {
+                profitStr = '-' + profitStr.replace('-', '');
+            }
+
+            const trade: RealTestTrade = {
+                tradeId: cols[0]?.trim() || '',
+                strategy: cols[1]?.trim() || '',
+                symbol: cols[2]?.trim().replace(/-\d+$/, '') || '', // Remove suffix like -202312
+                side: cols[3]?.trim() || '',
+                dateIn: cols[4]?.trim() || '',
+                timeIn: cols[5]?.trim() || '',
+                qtyIn: parseFloat(cols[6]) || 0,
+                priceIn: parseFloat(cols[7]) || 0,
+                dateOut: cols[8]?.trim() || '',
+                timeOut: cols[9]?.trim() || '',
+                qtyOut: parseFloat(cols[10]) || 0,
+                priceOut: parseFloat(cols[11]) || 0,
+                reason: cols[12]?.trim() || '',
+                profit: parseFloat(profitStr) || 0,
+                size: parseFloat(cols[19]?.replace(/[^0-9.-]/g, '')) || 0,
+                dividends: parseFloat(cols[20]?.replace(/[^0-9.-]/g, '')) || 0,
+                isOpen: cols[12]?.trim().toLowerCase() === 'end of test'
+            };
+
+            if (trade.symbol && trade.qtyIn > 0) {
+                trades.push(trade);
+            }
+        }
+
+        return trades;
+    };
+
+    // Calculate RealTest Sync Analysis
+    const calculateRealTestSync = useCallback((rtTrades: RealTestTrade[]) => {
+        // Get Pension Fund TWS data
+        const pfAccount = twsAccounts['U15971587'];
+        const pfPositions = twsPositions.filter(p => p.account === 'U15971587');
+
+        if (!pfAccount) {
+            setError('Pension Fund account (U15971587) not found. Connect to TWS first.');
+            return null;
+        }
+
+        // Get open positions from RealTest
+        const rtOpenPositions = rtTrades.filter(t => t.isOpen);
+
+        // Calculate RT theoretical balance
+        // Sum of all profits + starting capital (approximate from first trade size)
+        const totalProfit = rtTrades.reduce((sum, t) => sum + t.profit + t.dividends, 0);
+        const latestPositionValues = rtOpenPositions.reduce((sum, t) => sum + (t.qtyIn * t.priceIn), 0);
+        // Approximate starting capital from pattern
+        const rtBalance = latestPositionValues + totalProfit;
+
+        // Calculate RT theoretical cash (balance - open position costs)
+        const rtCash = totalProfit; // Simplified: cash = cumulative profits
+
+        // TWS actuals
+        const twsBalance = pfAccount.netLiquidation;
+        const twsCash = pfAccount.totalCashValue;
+
+        // Position comparison
+        const positionComparison = rtOpenPositions.map(rt => {
+            const twsMatch = pfPositions.find(p => p.symbol === rt.symbol);
+            return {
+                symbol: rt.symbol,
+                rtQty: rt.qtyIn,
+                rtCost: rt.priceIn,
+                twsQty: twsMatch?.position || 0,
+                twsCost: twsMatch?.avgCost || 0,
+                qtyDelta: (twsMatch?.position || 0) - rt.qtyIn,
+                valueDelta: twsMatch
+                    ? (twsMatch.position * twsMatch.avgCost) - (rt.qtyIn * rt.priceIn)
+                    : -(rt.qtyIn * rt.priceIn)
+            };
+        });
+
+        // Add TWS positions not in RealTest
+        pfPositions.forEach(twsPos => {
+            if (!rtOpenPositions.find(rt => rt.symbol === twsPos.symbol)) {
+                positionComparison.push({
+                    symbol: twsPos.symbol,
+                    rtQty: 0,
+                    rtCost: 0,
+                    twsQty: twsPos.position,
+                    twsCost: twsPos.avgCost,
+                    qtyDelta: twsPos.position,
+                    valueDelta: twsPos.position * twsPos.avgCost
+                });
+            }
+        });
+
+        // Calculate drift
+        const drift = twsBalance - rtBalance;
+
+        // Calculate recommended adjustment
+        // We need: enough cash to cover upcoming buys + buffer
+        // Required in RT = RT balance should match TWS balance
+        // If TWS > RT: user deposited more IRL than in RealTest → Add Deposit to RT
+        // If TWS < RT: user is behind IRL → Add Withdrawal to RT (or deposit IRL)
+        const adjustment = drift; // Positive = add deposit to RT, Negative = add withdrawal
+
+        const analysis: RealTestSyncAnalysis = {
+            rtBalance,
+            twsBalance,
+            rtCash,
+            twsCash,
+            drift,
+            positionComparison,
+            recommendedAdjustment: Math.abs(adjustment),
+            adjustmentType: adjustment > 100 ? 'DEPOSIT' : adjustment < -100 ? 'WITHDRAWAL' : 'NONE'
+        };
+
+        setRealTestSyncAnalysis(analysis);
+        return analysis;
+    }, [twsAccounts, twsPositions]);
+
+    // Handle RealTest CSV Upload
+    const handleRealTestUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            const content = event.target?.result as string;
+            const trades = parseRealTestCSV(content);
+            setRealTestTrades(trades);
+            setShowRealTestSync(true);
+
+            // Auto-calculate sync if TWS connected
+            if (twsConnected) {
+                calculateRealTestSync(trades);
+            }
+        };
+        reader.readAsText(file);
     };
 
     // Smart Rebalancing Calculation
@@ -1341,6 +1537,158 @@ export default function IBKRTracker() {
                     </div>
                 </div>
             )}
+
+            {/* RealTest Sync Tool */}
+            <div className="bg-gradient-to-r from-teal-900/30 to-cyan-900/30 rounded-xl p-4 border border-teal-500/30">
+                <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center space-x-3">
+                        <span className="text-2xl">🔄</span>
+                        <h3 className="text-lg font-bold text-white">RealTest ↔ TWS Sync</h3>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-teal-500/10 text-teal-400 border border-teal-500/20">PENSIJA</span>
+                    </div>
+                    <div className="flex items-center space-x-3">
+                        <label className="px-3 py-1.5 text-xs bg-teal-600 hover:bg-teal-500 text-white rounded cursor-pointer transition-all flex items-center gap-1">
+                            📁 Upload RealTest CSV
+                            <input
+                                type="file"
+                                accept=".csv"
+                                className="hidden"
+                                onChange={handleRealTestUpload}
+                            />
+                        </label>
+                        {showRealTestSync && (
+                            <button
+                                onClick={() => setShowRealTestSync(false)}
+                                className="text-slate-400 hover:text-white text-sm"
+                            >
+                                ✕
+                            </button>
+                        )}
+                    </div>
+                </div>
+
+                {showRealTestSync && realTestTrades.length > 0 && (
+                    <div className="space-y-4">
+                        {/* Account Comparison Cards */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-700">
+                                <div className="text-xs text-slate-500 uppercase mb-1">RealTest (Theoretical)</div>
+                                <div className="text-2xl font-bold text-white">
+                                    ${realTestSyncAnalysis?.rtBalance.toLocaleString(undefined, { maximumFractionDigits: 0 }) || '-'}
+                                </div>
+                                <div className="text-xs text-slate-400 mt-1">
+                                    {realTestTrades.filter(t => t.isOpen).length} open positions
+                                </div>
+                            </div>
+                            <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-700">
+                                <div className="text-xs text-slate-500 uppercase mb-1">IBKR TWS (Actual)</div>
+                                <div className="text-2xl font-bold text-white">
+                                    ${realTestSyncAnalysis?.twsBalance.toLocaleString(undefined, { maximumFractionDigits: 0 }) || '-'}
+                                </div>
+                                <div className="text-xs text-slate-400 mt-1">
+                                    Cash: ${realTestSyncAnalysis?.twsCash.toLocaleString(undefined, { maximumFractionDigits: 0 }) || '-'}
+                                </div>
+                            </div>
+                            <div className={`rounded-lg p-4 border ${(realTestSyncAnalysis?.drift || 0) >= 0
+                                    ? 'bg-emerald-900/30 border-emerald-500/30'
+                                    : 'bg-rose-900/30 border-rose-500/30'
+                                }`}>
+                                <div className="text-xs text-slate-500 uppercase mb-1">Drift (TWS - RT)</div>
+                                <div className={`text-2xl font-bold ${(realTestSyncAnalysis?.drift || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                                    }`}>
+                                    {(realTestSyncAnalysis?.drift || 0) >= 0 ? '+' : ''}
+                                    ${realTestSyncAnalysis?.drift.toLocaleString(undefined, { maximumFractionDigits: 0 }) || '0'}
+                                </div>
+                                <div className="text-xs text-slate-400 mt-1">
+                                    {(realTestSyncAnalysis?.drift || 0) >= 0 ? '▲ Outperforming' : '▼ Underperforming'}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Recommendation Banner */}
+                        {realTestSyncAnalysis && realTestSyncAnalysis.adjustmentType !== 'NONE' && (
+                            <div className={`rounded-lg p-4 border flex items-center justify-between ${realTestSyncAnalysis.adjustmentType === 'DEPOSIT'
+                                    ? 'bg-emerald-900/20 border-emerald-500/30'
+                                    : 'bg-amber-900/20 border-amber-500/30'
+                                }`}>
+                                <div className="flex items-center space-x-3">
+                                    <span className="text-2xl">💡</span>
+                                    <div>
+                                        <div className={`font-bold ${realTestSyncAnalysis.adjustmentType === 'DEPOSIT' ? 'text-emerald-400' : 'text-amber-400'
+                                            }`}>
+                                            Add a {realTestSyncAnalysis.adjustmentType} of ${realTestSyncAnalysis.recommendedAdjustment.toLocaleString(undefined, { maximumFractionDigits: 0 })} to RealTest
+                                        </div>
+                                        <div className="text-xs text-slate-400 mt-0.5">
+                                            This will sync your RealTest balance with IBKR and maintain ${CASH_BUFFER.toLocaleString()} cash buffer
+                                        </div>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => {
+                                        const text = `${realTestSyncAnalysis.adjustmentType === 'DEPOSIT' ? '' : '-'}${realTestSyncAnalysis.recommendedAdjustment}`;
+                                        navigator.clipboard.writeText(text);
+                                        alert(`Copied: ${text}`);
+                                    }}
+                                    className="px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 text-white rounded"
+                                >
+                                    📋 Copy Amount
+                                </button>
+                            </div>
+                        )}
+
+                        {/* Position Comparison Table */}
+                        {realTestSyncAnalysis && realTestSyncAnalysis.positionComparison.length > 0 && (
+                            <div className="bg-slate-800/30 rounded-lg p-4 border border-slate-700">
+                                <h4 className="text-slate-300 font-semibold mb-3">Position Comparison</h4>
+                                <table className="w-full text-xs">
+                                    <thead className="text-slate-500 uppercase">
+                                        <tr>
+                                            <th className="text-left py-2">Symbol</th>
+                                            <th className="text-right py-2">RT Qty</th>
+                                            <th className="text-right py-2">RT Cost</th>
+                                            <th className="text-right py-2">TWS Qty</th>
+                                            <th className="text-right py-2">TWS Cost</th>
+                                            <th className="text-right py-2">Qty Δ</th>
+                                            <th className="text-right py-2">Value Δ</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="text-slate-300">
+                                        {realTestSyncAnalysis.positionComparison.map(p => (
+                                            <tr key={p.symbol} className="border-t border-slate-700/50 hover:bg-slate-700/20">
+                                                <td className="py-2 font-mono font-bold">{p.symbol}</td>
+                                                <td className="py-2 text-right">{p.rtQty}</td>
+                                                <td className="py-2 text-right">${p.rtCost.toFixed(2)}</td>
+                                                <td className="py-2 text-right">{p.twsQty}</td>
+                                                <td className="py-2 text-right">${p.twsCost.toFixed(2)}</td>
+                                                <td className={`py-2 text-right font-bold ${p.qtyDelta === 0 ? 'text-slate-500' : p.qtyDelta > 0 ? 'text-emerald-400' : 'text-rose-400'
+                                                    }`}>
+                                                    {p.qtyDelta === 0 ? '-' : (p.qtyDelta > 0 ? '+' : '') + p.qtyDelta}
+                                                </td>
+                                                <td className={`py-2 text-right font-bold ${Math.abs(p.valueDelta) < 10 ? 'text-slate-500' : p.valueDelta > 0 ? 'text-emerald-400' : 'text-rose-400'
+                                                    }`}>
+                                                    {Math.abs(p.valueDelta) < 10 ? '-' : (p.valueDelta > 0 ? '+$' : '-$') + Math.abs(p.valueDelta).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+
+                        {/* Trade Summary */}
+                        <div className="text-xs text-slate-500 text-center">
+                            Loaded {realTestTrades.length} trades from RealTest • {realTestTrades.filter(t => t.isOpen).length} open positions
+                        </div>
+                    </div>
+                )}
+
+                {!showRealTestSync && (
+                    <div className="text-center py-6 text-slate-500">
+                        <p className="text-sm">Upload your RealTest trade list CSV to compare theoretical vs actual positions</p>
+                        <p className="text-xs mt-1 opacity-70">Supports C:\RealTest\Scripts\MK\Pensija.csv format</p>
+                    </div>
+                )}
+            </div>
 
             {/* Empty State */}
             {trades.length === 0 && !csvPreview && (
