@@ -160,6 +160,7 @@ const AllWeatherCalculator: React.FC = () => {
     };
 
     const fetchPrices = async () => {
+        console.log('[ALL WEATHER v1.3.7] fetchPrices() called');
         setIsRefreshing(true);
         const newAssets = [...assets];
         setDebugLogs([]);
