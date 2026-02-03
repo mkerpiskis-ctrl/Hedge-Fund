@@ -113,11 +113,14 @@ const AllWeatherCalculator: React.FC = () => {
                     let currency = meta?.currency;
 
                     // Manual overrides for known USD tickers on LSE/Xetra
-                    if (['IGLN.L', 'CNDX.L', 'DTLA.L', 'WEXU.DE'].includes(asset.ticker)) {
+                    // FIXED: Using trim() to catch hidden spaces
+                    const tick = asset.ticker.trim();
+                    if (['IGLN.L', 'CNDX.L', 'DTLA.L', 'WEXU.DE'].includes(tick)) {
                         if (price) {
-                            newAssets[i].currency = 'USD';
+                            newAssets[i].currency = 'USD'; // Force display as USD
                             newAssets[i].price = price.toFixed(4);
                         }
+                        // CRITICAL: Skip downstream conversion
                         continue;
                     }
 
