@@ -131,6 +131,12 @@ const AllWeatherCalculator: React.FC = () => {
 
                     if (tick.includes('IGLN') || tick.includes('CNDX') || tick.includes('DTLA') || tick.includes('WEXU')) {
                         if (price) {
+                            // Specific Fix for IGLN.L double-conversion anomaly
+                            if (tick.includes('IGLN') && price > 95 && eurUsd > 1) {
+                                log(`CORRECTING IGLN ANOMALY: ${price.toFixed(4)} / ${eurUsd} (EUR)`);
+                                price = price / eurUsd;
+                            }
+
                             newAssets[i].currency = 'USD'; // Force display as USD
                             newAssets[i].price = price.toFixed(4);
                             newAssets[i].isLocked = true; // Visual indicator
