@@ -133,12 +133,14 @@ const AllWeatherCalculator: React.FC = () => {
 
                     if (tick.includes('IGLN') || asset.id === 'gold') {
                         if (price) {
-                            // Specific Fix for IGLN.L double-conversion anomaly (Yahoo sends ~98 instead of ~90)
-                            // We detect this by checking if price is unrealistically high (>95)
-                            if (price > 95 && eurUsd > 0) {
+                            // Specific Fix for IGLN.L double-conversion anomaly
+                            // v1.2.8: Yahoo appears to be scaling by ~1.083 (old rate?), while live rate is ~1.18.
+                            // We must divide by the fixed Yahoo factor, not the dynamic live rate.
+                            if (price > 95) {
+                                const anomalyFactor = 1.083;
                                 const original = price;
-                                price = price / eurUsd;
-                                log(`CORRECTED IGLN ANOMALY: ${original.toFixed(4)} -> ${price.toFixed(4)} (Div by EURUSD ${eurUsd})`);
+                                price = price / anomalyFactor;
+                                log(`CORRECTED IGLN ANOMALY: ${original.toFixed(4)} -> ${price.toFixed(4)} (Fixed Factor ${anomalyFactor})`);
                             }
 
                             newAssets[i].currency = 'USD'; // Force display as USD
