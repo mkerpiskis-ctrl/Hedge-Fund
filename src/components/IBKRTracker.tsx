@@ -74,6 +74,18 @@ export default function IBKRTracker() {
     const [twsPositions, setTwsPositions] = useState<TWSPosition[]>([]);
     const [twsTotals, setTwsTotals] = useState<{ netLiquidation: number; totalCashValue: number; unrealizedPnL: number } | null>(null);
     const [twsError, setTwsError] = useState<string | null>(null);
+    const [selectedAccount, setSelectedAccount] = useState<string>('ALL'); // 'ALL' or specific account ID
+    const [isRebalanceMode, setIsRebalanceMode] = useState(false);
+    const [rebalancePreview, setRebalancePreview] = useState<{
+        symbol: string;
+        system: string;
+        targetValue: number;
+        targetQty: number;
+        currentQty: number;
+        delta: number;
+        action: 'BUY' | 'SELL' | 'HOLD';
+        price: number;
+    }[] | null>(null);
 
     // Load data from localStorage with migration for old format
     useEffect(() => {
@@ -156,6 +168,20 @@ export default function IBKRTracker() {
             setTwsConnected(false);
         }
     }, []);
+
+    // Derived totals based on selection
+    const displayedTotals = selectedAccount === 'ALL'
+        ? twsTotals
+        : (twsAccounts[selectedAccount] ? {
+            netLiquidation: twsAccounts[selectedAccount].netLiquidation,
+            totalCashValue: twsAccounts[selectedAccount].totalCashValue,
+            unrealizedPnL: twsAccounts[selectedAccount].unrealizedPnL
+        } : null);
+
+    // Derived positions based on selection
+    const displayedTwsPositions = selectedAccount === 'ALL'
+        ? twsPositions
+        : twsPositions.filter(p => p.account === selectedAccount);
 
     // Auto-fetch TWS data on mount and every 30 seconds
     useEffect(() => {
@@ -264,6 +290,63 @@ export default function IBKRTracker() {
         return 'RUI';
     };
 
+    // Smart Rebalancing Calculation
+    const calculateSmartRebalance = (csvTrades: Trade[]) => {
+        if (!displayedTotals || selectedAccount === 'ALL') {
+            alert('Please select a specific account (e.g., U15771225) to use Smart Rebalancing.');
+            return null;
+        }
+
+        const equity = displayedTotals.netLiquidation;
+        const ndxTargetPerPos = (equity * 0.5) / 5;  // $3,000 if equity is $30k
+        const ruiTargetPerPos = (equity * 0.5) / 10; // $1,500 if equity is $30k
+
+        // 1. Identify unique symbols from CSV and their systems
+        const symbolMap = new Map<string, { systems: Set<string>, price: number }>();
+
+        csvTrades.forEach(t => {
+            if (!symbolMap.has(t.symbol)) {
+                symbolMap.set(t.symbol, { systems: new Set(), price: t.price });
+            }
+            symbolMap.get(t.symbol)?.systems.add(t.system);
+        });
+
+        const previewData = [];
+
+        // 2. Calculate targets for each symbol
+        for (const [symbol, data] of symbolMap.entries()) {
+            let targetValue = 0;
+            if (data.systems.has('NDX')) targetValue += ndxTargetPerPos;
+            if (data.systems.has('RUI')) targetValue += ruiTargetPerPos;
+
+            const price = data.price || 1; // Avoid division by zero
+            const targetQty = Math.floor(targetValue / price);
+
+            // 3. Get current position for THIS account only
+            const currentPos = displayedTwsPositions.find(p => p.symbol === symbol);
+            const currentQty = currentPos ? currentPos.position : 0;
+
+            // 4. Calculate Delta
+            const delta = targetQty - currentQty;
+            let action: 'BUY' | 'SELL' | 'HOLD' = 'HOLD';
+            if (delta > 0) action = 'BUY';
+            if (delta < 0) action = 'SELL';
+
+            previewData.push({
+                symbol,
+                system: Array.from(data.systems).join('+'),
+                targetValue,
+                targetQty,
+                currentQty,
+                delta,
+                action,
+                price
+            });
+        }
+
+        return previewData;
+    };
+
     // Handle file upload
     const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -274,12 +357,28 @@ export default function IBKRTracker() {
         reader.onload = (event) => {
             try {
                 const content = event.target?.result as string;
-                const parsed = parseCSV(content, file.name);
-                if (parsed.length === 0) {
+                const parsedTrades = parseCSV(content, file.name);
+                if (parsedTrades.length === 0) {
                     setError('No valid trades found in CSV');
                     return;
                 }
-                setCsvPreview(parsed);
+
+                if (isRebalanceMode) {
+                    const rebalanceData = calculateSmartRebalance(parsedTrades);
+                    if (rebalanceData) {
+                        setRebalancePreview(rebalanceData);
+                        setCsvPreview(null); // Clear normal preview
+                    } else {
+                        // If calculation failed (e.g. no account selected), reset file input
+                        // Note: event.target here is FileReader, not the input element.
+                        // A ref to the input element would be needed for a robust reset.
+                        // For now, we'll leave the user's provided line.
+                        (e.target as HTMLInputElement).value = '';
+                    }
+                } else {
+                    setCsvPreview(parsedTrades);
+                    setRebalancePreview(null);
+                }
             } catch (e) {
                 setError('Failed to parse CSV file');
             }
@@ -287,21 +386,51 @@ export default function IBKRTracker() {
         reader.readAsText(file);
     };
 
-    // Import previewed trades
-    const importTrades = () => {
-        if (!csvPreview) return;
+    const confirmImport = () => {
+        if (rebalancePreview) {
+            // Convert Rebalance Preview to Trades
+            const newTrades: Trade[] = rebalancePreview
+                .filter(p => p.action !== 'HOLD')
+                .map(p => ({
+                    id: crypto.randomUUID(),
+                    date: new Date().toISOString().split('T')[0],
+                    system: p.system.includes('NDX') ? 'NDX' : 'RUI', // Simplification for mixed
+                    symbol: p.symbol,
+                    action: p.action === 'SELL' ? 'SELL' : 'BUY', // Explicitly map action
+                    quantity: Math.abs(p.delta),
+                    price: p.price,
+                    totalValue: Math.abs(p.delta) * p.price,
+                    importedAt: new Date().toISOString()
+                }));
 
-        const newTrades = [...trades, ...csvPreview];
-        setTrades(newTrades);
+            const updatedTrades = [...trades, ...newTrades];
+            setTrades(updatedTrades);
 
-        // Update positions based on new trades
-        const newPositions = calculatePositions(newTrades);
-        setPositions(newPositions);
+            // Recalculate positions
+            const newPositions = calculatePositions(updatedTrades);
+            setPositions(newPositions);
 
-        saveData(newTrades, newPositions, cashBalance);
-        setCsvPreview(null);
+            saveData(updatedTrades, newPositions, cashBalance);
+            setRebalancePreview(null);
+        } else if (csvPreview) {
+            const newTrades = [...trades, ...csvPreview];
+            setTrades(newTrades);
+
+            // Recalculate positions
+            const newPositions = calculatePositions(newTrades);
+            setPositions(newPositions);
+
+            // Update cash balance (optional: logic to deduce cost)
+            // For now, just save
+            saveData(newTrades, newPositions, cashBalance);
+            setCsvPreview(null);
+        }
     };
 
+    const cancelImport = () => {
+        setCsvPreview(null);
+        setRebalancePreview(null);
+    };
     // Delete a single trade
     const deleteTrade = (tradeId: string) => {
         const newTrades = trades.filter(t => t.id !== tradeId);
@@ -429,12 +558,26 @@ export default function IBKRTracker() {
                         <h3 className="text-lg font-bold text-white">IBKR Live</h3>
                         {twsConnected && <span className="text-xs text-emerald-400">Connected</span>}
                     </div>
-                    <button
-                        onClick={fetchTwsData}
-                        className="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded transition-all"
-                    >
-                        🔄 Refresh
-                    </button>
+                    <div className="flex items-center space-x-3">
+                        {/* Account Selector */}
+                        <select
+                            value={selectedAccount}
+                            onChange={(e) => setSelectedAccount(e.target.value)}
+                            className="bg-slate-800 text-white text-xs px-2 py-1 rounded border border-slate-600 focus:outline-none focus:border-blue-500"
+                        >
+                            <option value="ALL">All Accounts</option>
+                            {Object.keys(twsAccounts).map(acc => (
+                                <option key={acc} value={acc}>{acc}</option>
+                            ))}
+                        </select>
+
+                        <button
+                            onClick={fetchTwsData}
+                            className="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded transition-all flex items-center gap-1"
+                        >
+                            🔄 Refresh
+                        </button>
+                    </div>
                 </div>
 
                 {twsError && (
@@ -444,20 +587,20 @@ export default function IBKRTracker() {
                     </div>
                 )}
 
-                {twsTotals && (
+                {displayedTotals && (
                     <div className="grid grid-cols-3 gap-4 mb-4">
                         <div className="bg-slate-800/50 rounded-lg p-3 text-center">
                             <div className="text-xs text-slate-400 uppercase">Total Equity</div>
-                            <div className="text-2xl font-bold text-white">${twsTotals.netLiquidation.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
+                            <div className="text-2xl font-bold text-white">${displayedTotals.netLiquidation.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
                         </div>
                         <div className="bg-slate-800/50 rounded-lg p-3 text-center">
                             <div className="text-xs text-slate-400 uppercase">Cash</div>
-                            <div className="text-2xl font-bold text-emerald-400">${twsTotals.totalCashValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
+                            <div className="text-2xl font-bold text-emerald-400">${displayedTotals.totalCashValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
                         </div>
                         <div className="bg-slate-800/50 rounded-lg p-3 text-center">
                             <div className="text-xs text-slate-400 uppercase">Unrealized P&L</div>
-                            <div className={`text-2xl font-bold ${twsTotals.unrealizedPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                {twsTotals.unrealizedPnL >= 0 ? '+' : ''}${twsTotals.unrealizedPnL.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                            <div className={`text-2xl font-bold ${displayedTotals.unrealizedPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                {displayedTotals.unrealizedPnL >= 0 ? '+' : ''}${displayedTotals.unrealizedPnL.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                             </div>
                         </div>
                     </div>
@@ -484,9 +627,9 @@ export default function IBKRTracker() {
                 )}
 
                 {/* TWS Positions */}
-                {twsPositions.length > 0 && (
+                {displayedTwsPositions.length > 0 && (
                     <div className="mt-4">
-                        <div className="text-xs text-slate-400 uppercase mb-2">Live Positions ({twsPositions.length})</div>
+                        <div className="text-xs text-slate-400 uppercase mb-2">Live Positions ({displayedTwsPositions.length})</div>
                         <div className="max-h-40 overflow-y-auto">
                             <table className="w-full text-xs">
                                 <thead className="text-slate-500 sticky top-0 bg-slate-900/80">
@@ -498,7 +641,7 @@ export default function IBKRTracker() {
                                     </tr>
                                 </thead>
                                 <tbody className="text-slate-300">
-                                    {twsPositions.map((p, idx) => (
+                                    {displayedTwsPositions.map((p, idx) => (
                                         <tr key={`${p.account}_${p.symbol}_${idx}`} className="border-t border-slate-700/30">
                                             <td className="py-1 font-mono font-bold text-amber-400">{p.symbol}</td>
                                             <td className="py-1 text-slate-500">{p.account}</td>
@@ -582,7 +725,21 @@ export default function IBKRTracker() {
             </div>
 
             {/* CSV Upload */}
-            <div className="bg-slate-800/30 rounded-lg p-6 border border-dashed border-slate-600 text-center">
+            <div className="bg-slate-800/30 rounded-lg p-6 border border-dashed border-slate-600 text-center relative">
+                {/* Rebalance Mode Toggle */}
+                <div className="absolute top-2 right-2 flex items-center space-x-2 bg-slate-800/80 p-2 rounded border border-slate-700">
+                    <input
+                        type="checkbox"
+                        id="rebalanceMode"
+                        checked={isRebalanceMode}
+                        onChange={(e) => setIsRebalanceMode(e.target.checked)}
+                        className="rounded border-slate-600 text-blue-600 focus:ring-blue-500 bg-slate-700"
+                    />
+                    <label htmlFor="rebalanceMode" className="text-xs text-slate-300 font-bold cursor-pointer">
+                        Smart Rebalance Mode 🧠
+                    </label>
+                </div>
+
                 <input
                     type="file"
                     accept=".csv"
@@ -592,7 +749,7 @@ export default function IBKRTracker() {
                 />
                 <label
                     htmlFor="csvUpload"
-                    className="cursor-pointer block"
+                    className="cursor-pointer block pt-6"
                 >
                     <div className="text-4xl mb-2">📁</div>
                     <p className="text-slate-300 font-medium">Upload RealTest CSV</p>
@@ -601,58 +758,105 @@ export default function IBKRTracker() {
                 {error && <p className="text-rose-400 text-sm mt-2">{error}</p>}
             </div>
 
-            {/* CSV Preview Modal */}
-            {csvPreview && (
+            {/* CSV/Rebalance Preview Modal */}
+            {(csvPreview || rebalancePreview) && (
                 <div className="bg-slate-800 rounded-lg p-4 border border-amber-500/50">
                     <div className="flex items-center justify-between mb-4">
-                        <h4 className="text-amber-400 font-semibold">Preview: {csvPreview.length} trades found</h4>
+                        <h4 className="text-amber-400 font-semibold">
+                            {rebalancePreview ? 'Smart Rebalance Plan 🧠' : `Preview: ${csvPreview?.length} trades found`}
+                        </h4>
                         <div className="flex space-x-2">
                             <button
-                                onClick={() => setCsvPreview(null)}
+                                onClick={cancelImport}
                                 className="px-3 py-1 bg-slate-700 text-slate-300 text-xs rounded hover:bg-slate-600"
                             >
                                 Cancel
                             </button>
                             <button
-                                onClick={importTrades}
+                                onClick={confirmImport}
                                 className="px-3 py-1 bg-emerald-600 text-white text-xs font-bold rounded hover:bg-emerald-500"
                             >
-                                Import All
+                                {rebalancePreview ? 'Execute Rebalance' : 'Import All'}
                             </button>
                         </div>
                     </div>
-                    <div className="max-h-48 overflow-y-auto">
-                        <table className="w-full text-xs">
-                            <thead className="text-slate-500 uppercase">
-                                <tr>
-                                    <th className="text-left py-1">Date</th>
-                                    <th className="text-left py-1">System</th>
-                                    <th className="text-left py-1">Symbol</th>
-                                    <th className="text-left py-1">Action</th>
-                                    <th className="text-right py-1">Qty</th>
-                                    <th className="text-right py-1">Price</th>
-                                </tr>
-                            </thead>
-                            <tbody className="text-slate-300">
-                                {csvPreview.slice(0, 10).map(t => (
-                                    <tr key={t.id} className="border-t border-slate-700">
-                                        <td className="py-1">{t.date}</td>
-                                        <td className="py-1">
-                                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${t.system === 'NDX' ? 'bg-blue-500/20 text-blue-400' : 'bg-purple-500/20 text-purple-400'
-                                                }`}>{t.system}</span>
-                                        </td>
-                                        <td className="py-1 font-mono">{t.symbol}</td>
-                                        <td className={`py-1 ${t.action === 'BUY' ? 'text-emerald-400' : 'text-rose-400'}`}>{t.action}</td>
-                                        <td className="py-1 text-right">{t.quantity}</td>
-                                        <td className="py-1 text-right">${t.price.toFixed(2)}</td>
+
+                    {/* Rebalance Preview Table */}
+                    {rebalancePreview && (
+                        <div className="max-h-64 overflow-y-auto">
+                            <table className="w-full text-xs">
+                                <thead className="text-slate-500 uppercase sticky top-0 bg-slate-800">
+                                    <tr>
+                                        <th className="text-left py-1">Symbol</th>
+                                        <th className="text-left py-1">System</th>
+                                        <th className="text-right py-1">Target $</th>
+                                        <th className="text-right py-1">Target Qty</th>
+                                        <th className="text-right py-1">Current (TWS)</th>
+                                        <th className="text-right py-1">Delta</th>
+                                        <th className="text-center py-1">Action</th>
                                     </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                        {csvPreview.length > 10 && (
-                            <p className="text-slate-500 text-center mt-2">...and {csvPreview.length - 10} more</p>
-                        )}
-                    </div>
+                                </thead>
+                                <tbody className="text-slate-300">
+                                    {rebalancePreview.map(p => (
+                                        <tr key={p.symbol} className="border-t border-slate-700 hover:bg-slate-700/30">
+                                            <td className="py-2 font-mono font-bold text-amber-400">{p.symbol}</td>
+                                            <td className="py-2">{p.system}</td>
+                                            <td className="py-2 text-right text-blue-300">${p.targetValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                                            <td className="py-2 text-right font-bold">{p.targetQty}</td>
+                                            <td className="py-2 text-right text-slate-400">{p.currentQty}</td>
+                                            <td className={`py-2 text-right font-bold ${p.delta > 0 ? 'text-emerald-400' : p.delta < 0 ? 'text-rose-400' : 'text-slate-500'}`}>
+                                                {p.delta > 0 ? '+' : ''}{p.delta}
+                                            </td>
+                                            <td className="py-2 text-center">
+                                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${p.action === 'BUY' ? 'bg-emerald-500/20 text-emerald-400' :
+                                                        p.action === 'SELL' ? 'bg-rose-500/20 text-rose-400' :
+                                                            'bg-slate-600/20 text-slate-500'
+                                                    }`}>
+                                                    {p.action}
+                                                </span>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+
+                    {/* Standard CSV Preview Table */}
+                    {csvPreview && !rebalancePreview && (
+                        <div className="max-h-48 overflow-y-auto">
+                            <table className="w-full text-xs">
+                                <thead className="text-slate-500 uppercase">
+                                    <tr>
+                                        <th className="text-left py-1">Date</th>
+                                        <th className="text-left py-1">System</th>
+                                        <th className="text-left py-1">Symbol</th>
+                                        <th className="text-left py-1">Action</th>
+                                        <th className="text-right py-1">Qty</th>
+                                        <th className="text-right py-1">Price</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="text-slate-300">
+                                    {csvPreview.slice(0, 10).map(t => (
+                                        <tr key={t.id} className="border-t border-slate-700">
+                                            <td className="py-1">{t.date}</td>
+                                            <td className="py-1">
+                                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${t.system === 'NDX' ? 'bg-blue-500/20 text-blue-400' : 'bg-purple-500/20 text-purple-400'
+                                                    }`}>{t.system}</span>
+                                            </td>
+                                            <td className="py-1 font-mono">{t.symbol}</td>
+                                            <td className={`py-1 ${t.action === 'BUY' ? 'text-emerald-400' : 'text-rose-400'}`}>{t.action}</td>
+                                            <td className="py-1 text-right">{t.quantity}</td>
+                                            <td className="py-1 text-right">${t.price.toFixed(2)}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                            {csvPreview.length > 10 && (
+                                <p className="text-slate-500 text-center mt-2">...and {csvPreview.length - 10} more</p>
+                            )}
+                        </div>
+                    )}
                 </div>
             )}
 
