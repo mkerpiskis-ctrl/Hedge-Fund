@@ -746,6 +746,37 @@ export default function IBKRTracker() {
         (selectedAccount === 'ALL' || p.account === selectedAccount || !p.account)
     );
 
+    // Consolidate filtered positions by symbol (for ALL view where same symbol may appear from multiple accounts)
+    const consolidatedFilteredPositions = useMemo(() => {
+        const consolidated = new Map<string, Position>();
+        for (const pos of filteredPositions) {
+            const existing = consolidated.get(pos.symbol);
+            if (existing) {
+                // Merge: sum quantity, weighted avgCost, combine systems
+                const totalQty = existing.quantity + pos.quantity;
+                const weightedCost = ((existing.avgCost * existing.quantity) + (pos.avgCost * pos.quantity)) / totalQty;
+                existing.quantity = totalQty;
+                existing.avgCost = weightedCost;
+                // Merge systems
+                for (const sys of pos.systems) {
+                    if (!existing.systems.includes(sys)) {
+                        existing.systems.push(sys);
+                    }
+                }
+                // Update P&L
+                if (pos.currentPrice) existing.currentPrice = pos.currentPrice;
+                existing.marketValue = existing.currentPrice ? existing.currentPrice * existing.quantity : null;
+                existing.pnl = existing.marketValue ? existing.marketValue - (existing.avgCost * existing.quantity) : null;
+                existing.pnlPercent = (existing.currentPrice && existing.avgCost)
+                    ? ((existing.currentPrice - existing.avgCost) / existing.avgCost) * 100
+                    : null;
+            } else {
+                consolidated.set(pos.symbol, { ...pos, systems: [...pos.systems] });
+            }
+        }
+        return Array.from(consolidated.values());
+    }, [filteredPositions]);
+
     // MERGE LOGIC: Combine TWS Live Data with Manual System Tags
     const finalPositions = (twsConnected && selectedAccount !== 'ALL')
         ? displayedTwsPositions.map(twsPos => {
@@ -770,7 +801,7 @@ export default function IBKRTracker() {
                 pnlPercent
             };
         }).filter(p => systemFilter === 'ALL' || p.systems.includes(systemFilter))
-        : filteredPositions;
+        : consolidatedFilteredPositions;
 
     // Calculate totals based on FINAL positions (Live or Manual)
     const totalMarketValue = finalPositions.reduce((sum, p) => sum + (p.marketValue || 0), 0);
