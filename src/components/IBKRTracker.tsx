@@ -212,10 +212,28 @@ export default function IBKRTracker() {
             unrealizedPnL: twsAccounts[selectedAccount].unrealizedPnL
         } : null);
 
-    // Derived positions based on selection
-    const displayedTwsPositions = selectedAccount === 'ALL'
-        ? twsPositions
-        : twsPositions.filter(p => p.account === selectedAccount);
+    // Derived positions based on selection - CONSOLIDATED by symbol
+    const displayedTwsPositions = useMemo(() => {
+        const filtered = selectedAccount === 'ALL'
+            ? twsPositions
+            : twsPositions.filter(p => p.account === selectedAccount);
+
+        // Consolidate by symbol to prevent duplicates
+        const consolidated = new Map<string, TWSPosition>();
+        for (const pos of filtered) {
+            const existing = consolidated.get(pos.symbol);
+            if (existing) {
+                // Merge: sum position, weighted avgCost
+                const totalQty = existing.position + pos.position;
+                const weightedCost = ((existing.avgCost * existing.position) + (pos.avgCost * pos.position)) / totalQty;
+                existing.position = totalQty;
+                existing.avgCost = weightedCost;
+            } else {
+                consolidated.set(pos.symbol, { ...pos });
+            }
+        }
+        return Array.from(consolidated.values());
+    }, [twsPositions, selectedAccount]);
 
     // Merge Trades Logic
     const finalTrades = useMemo(() => {
