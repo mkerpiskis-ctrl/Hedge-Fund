@@ -1137,7 +1137,7 @@ export default function IBKRTracker() {
                     <h4 className="text-slate-300 font-semibold mb-3">
                         {twsConnected && selectedAccount !== 'ALL' ? 'Live TWS Positions 🟢' : 'Current Positions'}
                     </h4>
-                    <div className="overflow-x-auto">
+                    <div>
                         <table className="w-full text-xs">
                             <thead className="text-slate-500 uppercase">
                                 <tr>
