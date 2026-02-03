@@ -35,18 +35,31 @@ export default function IBKRTracker() {
     const [csvPreview, setCsvPreview] = useState<Trade[] | null>(null);
     const [error, setError] = useState<string | null>(null);
 
-    // Load data from localStorage
+    // Load data from localStorage with migration for old format
     useEffect(() => {
         try {
             const saved = localStorage.getItem(STORAGE_KEY);
             if (saved) {
                 const data = JSON.parse(saved);
                 setTrades(data.trades || []);
-                setPositions(data.positions || []);
+
+                // Migrate old positions with 'system' (string) to 'systems' (array)
+                const migratedPositions = (data.positions || []).map((p: any) => {
+                    if (p.systems) {
+                        return p; // Already new format
+                    } else if (p.system) {
+                        // Old format - convert to new
+                        return { ...p, systems: [p.system] };
+                    }
+                    return p;
+                });
+                setPositions(migratedPositions);
                 setCashBalance(data.cashBalance || 0);
             }
         } catch (e) {
             console.error('Failed to load IBKR data:', e);
+            // Clear corrupted data
+            localStorage.removeItem(STORAGE_KEY);
         }
     }, []);
 
