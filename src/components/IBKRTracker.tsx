@@ -1259,7 +1259,7 @@ export default function IBKRTracker() {
                             )}
                         </div>
                     </div>
-                    <div className="max-h-64 overflow-y-auto">
+                    <div className="overflow-x-auto">
                         <table className="w-full text-xs">
                             <thead className="text-slate-500 uppercase sticky top-0 bg-slate-800">
                                 <tr>
