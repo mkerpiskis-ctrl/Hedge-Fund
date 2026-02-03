@@ -368,7 +368,27 @@ export default function IBKRTracker() {
         }
 
         // Skip header row (first line contains "Action")
-        const startIndex = lines[0].toLowerCase().includes('action') ? 1 : 0;
+        const headerLine = lines[0].toLowerCase();
+        const hasHeader = headerLine.includes('action');
+        const startIndex = hasHeader ? 1 : 0;
+
+        // Dynamic Column Mapping
+        let basketTagIdx = 15; // Default TWS
+        let accountIdx = 16;   // Default TWS
+        let priceIdx = 10;     // Default LmtPrice
+
+        if (hasHeader) {
+            const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, '').toLowerCase());
+
+            const btIndex = headers.findIndex(h => h.includes('basket') || h.includes('tag'));
+            if (btIndex !== -1) basketTagIdx = btIndex;
+
+            const accIndex = headers.findIndex(h => h.includes('account'));
+            if (accIndex !== -1) accountIdx = accIndex;
+
+            const lmtIndex = headers.findIndex(h => h.includes('lmtprice') || h.includes('limit') || h.includes('price'));
+            if (lmtIndex !== -1) priceIdx = lmtIndex;
+        }
 
         for (let i = startIndex; i < lines.length; i++) {
             const line = lines[i].trim();
@@ -377,20 +397,15 @@ export default function IBKRTracker() {
             const cols = line.split(',').map(c => c.trim().replace(/"/g, ''));
             if (cols.length < 3) continue;
 
-            // IBKR Basket Trader format:
-            // Col 0: Action (BUY/SELL)
-            // Col 1: Quantity
-            // Col 2: Symbol
-            // ...
-            // Col 10: LmtPrice (or Market if empty/0)
-            // Col 15: BasketTag (NDX, RUI)
-            // Col 16: Account (Optional)
+            // IBKR Basket Trader format (Dynamic Indices):
             const action = cols[0]?.toUpperCase();
             const quantity = parseFloat(cols[1]) || 0;
             const symbol = cols[2] || '';
-            let price = parseFloat(cols[10]) || 0; // LmtPrice
-            const basketTag = cols[15] || '';
-            let account = cols[16] || '';
+
+            // Use dynamic indices
+            let price = parseFloat(cols[priceIdx]) || 0;
+            const basketTag = cols[basketTagIdx] || '';
+            let account = cols[accountIdx] || '';
 
             // Fallback: Use selected account if CSV doesn't specify
             if (!account && selectedAccount !== 'ALL') {
