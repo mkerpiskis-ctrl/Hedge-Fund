@@ -81,7 +81,7 @@ const AllWeatherCalculator: React.FC = () => {
         const newAssets = [...assets];
 
         // Fetch FX rates first
-        let eurUsd = 1.05; // fallback
+        let eurUsd = 1.083; // fallback (Updated Feb 2026)
         let gbpUsd = 1.25; // fallback
         try {
 
