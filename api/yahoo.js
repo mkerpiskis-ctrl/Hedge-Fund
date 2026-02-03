@@ -11,14 +11,14 @@ export default async function handler(req, res) {
         return res.status(200).end();
     }
 
-    const { symbol, range = '5d' } = req.query;
+    const { symbol, range = '5d', interval = '1d' } = req.query;
 
     if (!symbol) {
         return res.status(400).json({ error: 'Missing symbol parameter' });
     }
 
     try {
-        const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=${range}`;
+        const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=${interval}&range=${range}`;
 
         const response = await fetch(yahooUrl, {
             headers: {

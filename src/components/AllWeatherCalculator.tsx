@@ -118,9 +118,10 @@ const AllWeatherCalculator: React.FC = () => {
         let yahooData;
 
         if (ticker.includes('IGLN') || ticker === 'IGLN.L') {
-            // Use our own proxy to bypass third-party cache
-            const apiUrl = `/api/yahoo?symbol=${encodeURIComponent(ticker)}&range=5d&_=${Date.now()}`;
-            console.log(`[IGLN v1.5.1] Calling custom API: ${apiUrl}`);
+            // Use our own proxy with INTRADAY data to get current price
+            // range=5d was missing today's session; interval=1m&range=1d gives us current price
+            const apiUrl = `/api/yahoo?symbol=${encodeURIComponent(ticker)}&range=1d&interval=1m&_=${Date.now()}`;
+            console.log(`[IGLN v1.6.0] Calling intraday API: ${apiUrl}`);
             const res = await fetch(apiUrl);
             if (!res.ok) throw new Error(`API returned ${res.status}`);
             yahooData = await res.json();
