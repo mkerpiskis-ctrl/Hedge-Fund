@@ -101,10 +101,15 @@ const AllWeatherCalculator: React.FC = () => {
     };
 
     const fetchYahooData = async (ticker: string) => {
-        // Try Cache First
-        const cached = getCachedPrice(ticker);
-        if (cached) {
-            return { ...cached, fromCache: true };
+        // Try Cache First (but SKIP for IGLN to ensure fresh data)
+        if (!ticker.includes('IGLN')) {
+            const cached = getCachedPrice(ticker);
+            if (cached) {
+                console.log(`[CACHE HIT] ${ticker}:`, cached.price);
+                return { ...cached, fromCache: true };
+            }
+        } else {
+            console.log(`[IGLN] Skipping cache, fetching fresh data...`);
         }
 
         // Fetch Live
