@@ -15,7 +15,7 @@ interface Trade {
 
 interface Position {
     symbol: string;
-    system: 'NDX' | 'RUI';
+    systems: string[]; // Track which systems this position belongs to (e.g., ['NDX', 'RUI'])
     quantity: number;
     avgCost: number;
     currentPrice: number | null;
@@ -202,12 +202,13 @@ export default function IBKRTracker() {
         setCsvPreview(null);
     };
 
-    // Calculate positions from all trades
+    // Calculate positions from all trades - CONSOLIDATE same symbols across systems
     const calculatePositions = (allTrades: Trade[]): Position[] => {
         const posMap = new Map<string, Position>();
 
         for (const trade of allTrades) {
-            const key = `${trade.symbol}_${trade.system}`;
+            // Use only symbol as key to consolidate across systems
+            const key = trade.symbol;
             const existing = posMap.get(key);
 
             if (trade.action === 'BUY') {
@@ -216,10 +217,14 @@ export default function IBKRTracker() {
                     const newCost = ((existing.avgCost * existing.quantity) + trade.totalValue) / newQty;
                     existing.quantity = newQty;
                     existing.avgCost = newCost;
+                    // Add system if not already tracked
+                    if (!existing.systems.includes(trade.system)) {
+                        existing.systems.push(trade.system);
+                    }
                 } else {
                     posMap.set(key, {
                         symbol: trade.symbol,
-                        system: trade.system,
+                        systems: [trade.system],
                         quantity: trade.quantity,
                         avgCost: trade.price,
                         currentPrice: null,
@@ -249,7 +254,7 @@ export default function IBKRTracker() {
 
     const filteredPositions = systemFilter === 'ALL'
         ? positions
-        : positions.filter(p => p.system === systemFilter);
+        : positions.filter(p => p.systems.includes(systemFilter));
 
     // Calculate totals
     const totalMarketValue = filteredPositions.reduce((sum, p) => sum + (p.marketValue || 0), 0);
@@ -420,11 +425,18 @@ export default function IBKRTracker() {
                             </thead>
                             <tbody className="text-slate-300">
                                 {filteredPositions.map(p => (
-                                    <tr key={`${p.symbol}_${p.system}`} className="border-t border-slate-700/50 hover:bg-slate-700/20">
+                                    <tr key={p.symbol} className="border-t border-slate-700/50 hover:bg-slate-700/20">
                                         <td className="py-2 font-mono font-bold">{p.symbol}</td>
                                         <td className="py-2">
-                                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${p.system === 'NDX' ? 'bg-blue-500/20 text-blue-400' : 'bg-purple-500/20 text-purple-400'
-                                                }`}>{p.system}</span>
+                                            {p.systems.length > 1 ? (
+                                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-400">
+                                                    {p.systems.join(' + ')}
+                                                </span>
+                                            ) : (
+                                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${p.systems[0] === 'NDX' ? 'bg-blue-500/20 text-blue-400' : 'bg-purple-500/20 text-purple-400'}`}>
+                                                    {p.systems[0]}
+                                                </span>
+                                            )}
                                         </td>
                                         <td className="py-2 text-right">{p.quantity}</td>
                                         <td className="py-2 text-right">${p.avgCost.toFixed(2)}</td>
