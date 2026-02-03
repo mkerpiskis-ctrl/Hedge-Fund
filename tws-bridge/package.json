@@ -1,0 +1,15 @@
+{
+    "name": "tws-bridge",
+    "version": "1.0.0",
+    "description": "Bridge server between TWS API and Hedge Fund web app",
+    "main": "server.js",
+    "scripts": {
+        "start": "node server.js",
+        "dev": "node server.js"
+    },
+    "dependencies": {
+        "@stoqey/ib": "^1.4.3",
+        "cors": "^2.8.5",
+        "express": "^4.18.2"
+    }
+}

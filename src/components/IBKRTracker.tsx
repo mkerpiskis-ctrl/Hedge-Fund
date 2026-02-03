@@ -24,7 +24,38 @@ interface Position {
     pnlPercent: number | null;
 }
 
+// TWS Bridge Types
+interface TWSAccountSummary {
+    netLiquidation: number;
+    totalCashValue: number;
+    availableFunds: number;
+    buyingPower: number;
+    grossPositionValue: number;
+    unrealizedPnL: number;
+    realizedPnL: number;
+    currency: string;
+}
+
+interface TWSPosition {
+    account: string;
+    symbol: string;
+    secType: string;
+    exchange: string;
+    currency: string;
+    position: number;
+    avgCost: number;
+}
+
+interface TWSStatus {
+    connected: boolean;
+    twsPort: number;
+    accounts: string[];
+    positionCount: number;
+    lastError: { message: string; code: number } | null;
+}
+
 const STORAGE_KEY = 'ibkr_tracker_v1';
+const TWS_BRIDGE_URL = 'http://localhost:3001';
 
 export default function IBKRTracker() {
     const [trades, setTrades] = useState<Trade[]>([]);
@@ -36,6 +67,13 @@ export default function IBKRTracker() {
     const [error, setError] = useState<string | null>(null);
     const [editingTradeId, setEditingTradeId] = useState<string | null>(null);
     const [editingPositionSymbol, setEditingPositionSymbol] = useState<string | null>(null);
+
+    // TWS Bridge state
+    const [twsConnected, setTwsConnected] = useState(false);
+    const [twsAccounts, setTwsAccounts] = useState<Record<string, TWSAccountSummary>>({});
+    const [twsPositions, setTwsPositions] = useState<TWSPosition[]>([]);
+    const [twsTotals, setTwsTotals] = useState<{ netLiquidation: number; totalCashValue: number; unrealizedPnL: number } | null>(null);
+    const [twsError, setTwsError] = useState<string | null>(null);
 
     // Load data from localStorage with migration for old format
     useEffect(() => {
@@ -78,6 +116,53 @@ export default function IBKRTracker() {
             console.error('Failed to save IBKR data:', e);
         }
     }, []);
+
+    // Fetch data from TWS Bridge
+    const fetchTwsData = useCallback(async () => {
+        try {
+            // Check status first
+            const statusRes = await fetch(`${TWS_BRIDGE_URL}/api/status`);
+            if (!statusRes.ok) throw new Error('Bridge server not running');
+
+            const status: TWSStatus = await statusRes.json();
+            setTwsConnected(status.connected);
+
+            if (!status.connected) {
+                setTwsError('Not connected to TWS');
+                return;
+            }
+
+            // Fetch account data
+            const accountRes = await fetch(`${TWS_BRIDGE_URL}/api/account`);
+            if (accountRes.ok) {
+                const accountData = await accountRes.json();
+                if (accountData._totals) {
+                    setTwsTotals(accountData._totals);
+                    delete accountData._totals;
+                }
+                setTwsAccounts(accountData);
+            }
+
+            // Fetch positions
+            const posRes = await fetch(`${TWS_BRIDGE_URL}/api/positions`);
+            if (posRes.ok) {
+                const posData = await posRes.json();
+                setTwsPositions(posData);
+            }
+
+            setTwsError(null);
+        } catch (err) {
+            setTwsError(err instanceof Error ? err.message : 'Failed to connect to TWS Bridge');
+            setTwsConnected(false);
+        }
+    }, []);
+
+    // Auto-fetch TWS data on mount and every 30 seconds
+    useEffect(() => {
+        fetchTwsData();
+        const interval = setInterval(fetchTwsData, 30000);
+        return () => clearInterval(interval);
+    }, [fetchTwsData]);
 
     // Fetch live prices for positions
     const fetchLivePrices = useCallback(async () => {
@@ -336,6 +421,98 @@ export default function IBKRTracker() {
 
     return (
         <div className="space-y-6">
+            {/* TWS Live Dashboard */}
+            <div className="bg-gradient-to-r from-blue-900/30 to-purple-900/30 rounded-xl p-4 border border-blue-500/30">
+                <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center space-x-3">
+                        <span className={`w-3 h-3 rounded-full ${twsConnected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`}></span>
+                        <h3 className="text-lg font-bold text-white">IBKR Live</h3>
+                        {twsConnected && <span className="text-xs text-emerald-400">Connected</span>}
+                    </div>
+                    <button
+                        onClick={fetchTwsData}
+                        className="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded transition-all"
+                    >
+                        🔄 Refresh
+                    </button>
+                </div>
+
+                {twsError && (
+                    <div className="bg-rose-900/30 border border-rose-500/50 rounded-lg p-3 mb-4 text-sm text-rose-300">
+                        ⚠️ {twsError}
+                        <p className="text-xs mt-1 text-rose-400">Make sure TWS Bridge server is running: <code>cd tws-bridge && npm start</code></p>
+                    </div>
+                )}
+
+                {twsTotals && (
+                    <div className="grid grid-cols-3 gap-4 mb-4">
+                        <div className="bg-slate-800/50 rounded-lg p-3 text-center">
+                            <div className="text-xs text-slate-400 uppercase">Total Equity</div>
+                            <div className="text-2xl font-bold text-white">${twsTotals.netLiquidation.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
+                        </div>
+                        <div className="bg-slate-800/50 rounded-lg p-3 text-center">
+                            <div className="text-xs text-slate-400 uppercase">Cash</div>
+                            <div className="text-2xl font-bold text-emerald-400">${twsTotals.totalCashValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
+                        </div>
+                        <div className="bg-slate-800/50 rounded-lg p-3 text-center">
+                            <div className="text-xs text-slate-400 uppercase">Unrealized P&L</div>
+                            <div className={`text-2xl font-bold ${twsTotals.unrealizedPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                {twsTotals.unrealizedPnL >= 0 ? '+' : ''}${twsTotals.unrealizedPnL.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Account breakdown */}
+                {Object.keys(twsAccounts).length > 0 && (
+                    <div className="space-y-2">
+                        <div className="text-xs text-slate-400 uppercase mb-2">Account Breakdown</div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                            {Object.entries(twsAccounts).map(([accountId, data]) => (
+                                <div key={accountId} className="bg-slate-800/30 rounded-lg p-2 flex justify-between items-center text-sm">
+                                    <span className="font-mono text-slate-300">{accountId}</span>
+                                    <div className="flex space-x-4">
+                                        <span className="text-white">${data.netLiquidation.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                                        <span className={data.unrealizedPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
+                                            {data.unrealizedPnL >= 0 ? '+' : ''}${data.unrealizedPnL.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                        </span>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {/* TWS Positions */}
+                {twsPositions.length > 0 && (
+                    <div className="mt-4">
+                        <div className="text-xs text-slate-400 uppercase mb-2">Live Positions ({twsPositions.length})</div>
+                        <div className="max-h-40 overflow-y-auto">
+                            <table className="w-full text-xs">
+                                <thead className="text-slate-500 sticky top-0 bg-slate-900/80">
+                                    <tr>
+                                        <th className="text-left py-1">Symbol</th>
+                                        <th className="text-left py-1">Account</th>
+                                        <th className="text-right py-1">Qty</th>
+                                        <th className="text-right py-1">Avg Cost</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="text-slate-300">
+                                    {twsPositions.map((p, idx) => (
+                                        <tr key={`${p.account}_${p.symbol}_${idx}`} className="border-t border-slate-700/30">
+                                            <td className="py-1 font-mono font-bold text-amber-400">{p.symbol}</td>
+                                            <td className="py-1 text-slate-500">{p.account}</td>
+                                            <td className="py-1 text-right">{p.position.toFixed(2)}</td>
+                                            <td className="py-1 text-right">${p.avgCost.toFixed(2)}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                )}
+            </div>
+
             {/* Header with Filter */}
             <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-4">
