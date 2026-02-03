@@ -1635,7 +1635,7 @@ export default function IBKRTracker() {
                                         <span className="text-teal-300">
                                             {(() => {
                                                 const today = new Date();
-                                                const dateStr = `${today.getMonth() + 1}/${today.getDate()}/${today.getFullYear().toString().slice(-2)}`;
+                                                const dateStr = `${today.getMonth() + 1}/${today.getDate()}/${today.getFullYear()}`;
                                                 const amount = realTestSyncAnalysis.adjustmentType === 'DEPOSIT'
                                                     ? realTestSyncAnalysis.recommendedAdjustment
                                                     : -realTestSyncAnalysis.recommendedAdjustment;
@@ -1645,7 +1645,7 @@ export default function IBKRTracker() {
                                         <button
                                             onClick={() => {
                                                 const today = new Date();
-                                                const dateStr = `${today.getMonth() + 1}/${today.getDate()}/${today.getFullYear().toString().slice(-2)}`;
+                                                const dateStr = `${today.getMonth() + 1}/${today.getDate()}/${today.getFullYear()}`;
                                                 const amount = realTestSyncAnalysis.adjustmentType === 'DEPOSIT'
                                                     ? realTestSyncAnalysis.recommendedAdjustment
                                                     : -realTestSyncAnalysis.recommendedAdjustment;
