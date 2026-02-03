@@ -177,11 +177,11 @@ app.get('/api/account', (req, res) => {
         return res.status(503).json({ error: 'Not connected to TWS' });
     }
 
-    const accounts = Object.keys(accountData);
+    const accounts = Array.from(accountIds);
     if (accounts.length === 0) {
         return res.json({
             message: 'Account data loading...',
-            knownAccounts: Array.from(accountIds),
+            knownAccounts: [],
             hint: 'Try again in a few seconds'
         });
     }
@@ -192,7 +192,7 @@ app.get('/api/account', (req, res) => {
     let totalUnrealizedPnL = 0;
 
     for (const accountId of accounts) {
-        const data = accountData[accountId];
+        const data = accountData[accountId] || {};
         const netLiq = parseFloat(data.NetLiquidation?.value) || 0;
         const cash = parseFloat(data.TotalCashValue?.value) || 0;
         const unrealizedPnL = parseFloat(data.UnrealizedPnL?.value) || 0;

@@ -757,24 +757,7 @@ export default function IBKRTracker() {
                 )}
 
                 {/* Account breakdown */}
-                {Object.keys(twsAccounts).length > 0 && (
-                    <div className="space-y-2">
-                        <div className="text-xs text-slate-400 uppercase mb-2">Account Breakdown</div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                            {Object.entries(twsAccounts).map(([accountId, data]) => (
-                                <div key={accountId} className="bg-slate-800/30 rounded-lg p-2 flex justify-between items-center text-sm">
-                                    <span className="font-mono text-slate-300">{accountId}</span>
-                                    <div className="flex space-x-4">
-                                        <span className="text-white">${data.netLiquidation.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
-                                        <span className={data.unrealizedPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
-                                            {data.unrealizedPnL >= 0 ? '+' : ''}${data.unrealizedPnL.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                                        </span>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                )}
+
 
                 {/* TWS Positions */}
                 {displayedTwsPositions.length > 0 && (
