@@ -95,32 +95,56 @@ export default function IBKRTracker() {
         setIsLoading(false);
     }, [positions, trades, cashBalance, saveData]);
 
-    // Parse CSV file
-    const parseCSV = (content: string): Trade[] => {
+    // Parse IBKR Basket Trader CSV file
+    // Format: Action,Quantity,Symbol,SecType,Exchange,Currency,TimeInForce,GoodTilDate,GoodAfterTime,OrderType,LmtPrice,AuxPrice,OcaGroup,OrderId,ParentOrderId,BasketTag,Account
+    const parseCSV = (content: string, filename?: string): Trade[] => {
         const lines = content.trim().split('\n');
         const trades: Trade[] = [];
 
-        // Skip header row if present
-        const startIndex = lines[0].toLowerCase().includes('symbol') ? 1 : 0;
+        // Extract date from filename like "(Live) NDX_RUI_20260101.csv" or use today
+        let tradeDate = new Date().toISOString().split('T')[0];
+        if (filename) {
+            const dateMatch = filename.match(/(\d{8})/);
+            if (dateMatch) {
+                const d = dateMatch[1];
+                tradeDate = `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
+            }
+        }
+
+        // Skip header row (first line contains "Action")
+        const startIndex = lines[0].toLowerCase().includes('action') ? 1 : 0;
 
         for (let i = startIndex; i < lines.length; i++) {
-            const cols = lines[i].split(',').map(c => c.trim().replace(/"/g, ''));
-            if (cols.length < 5) continue;
+            const line = lines[i].trim();
+            if (!line) continue; // Skip empty lines
 
-            // Try to parse RealTest format
-            // Typical format: Date, Symbol, Action, Quantity, Price
+            const cols = line.split(',').map(c => c.trim().replace(/"/g, ''));
+            if (cols.length < 3) continue;
+
+            // IBKR Basket Trader format:
+            // Col 0: Action (BUY/SELL)
+            // Col 1: Quantity
+            // Col 2: Symbol
+            // Col 15: BasketTag (NDX, R1000, RUI, etc.)
+            const action = cols[0]?.toUpperCase();
+            const quantity = parseFloat(cols[1]) || 0;
+            const symbol = cols[2] || '';
+            const basketTag = cols[15] || '';
+
+            // Determine system from BasketTag
+            const system = detectSystem(basketTag);
+
             const trade: Trade = {
                 id: `${Date.now()}_${i}`,
-                date: cols[0] || new Date().toISOString().split('T')[0],
-                symbol: cols[1] || '',
-                action: cols[2]?.toUpperCase().includes('BUY') ? 'BUY' : 'SELL',
-                quantity: Math.abs(parseFloat(cols[3]) || 0),
-                price: parseFloat(cols[4]) || 0,
+                date: tradeDate,
+                symbol: symbol,
+                action: action === 'BUY' ? 'BUY' : 'SELL',
+                quantity: Math.abs(quantity),
+                price: 0, // Will be fetched live or entered manually
                 totalValue: 0,
-                system: detectSystem(cols[1] || ''),
+                system: system,
                 importedAt: new Date().toISOString()
             };
-            trade.totalValue = trade.quantity * trade.price;
 
             if (trade.symbol && trade.quantity > 0) {
                 trades.push(trade);
@@ -130,11 +154,14 @@ export default function IBKRTracker() {
         return trades;
     };
 
-    // Detect system based on symbol (can be enhanced)
-    const detectSystem = (symbol: string): 'NDX' | 'RUI' => {
-        // This is a placeholder - user can adjust mapping
-        // For now, alternate or use first letter
-        return symbol.charCodeAt(0) % 2 === 0 ? 'NDX' : 'RUI';
+    // Detect system from BasketTag
+    const detectSystem = (basketTag: string): 'NDX' | 'RUI' => {
+        const tag = basketTag.toUpperCase();
+        if (tag.includes('NDX') || tag.includes('NASDAQ')) {
+            return 'NDX';
+        }
+        // R1000, RUI, Russell, etc. -> RUI
+        return 'RUI';
     };
 
     // Handle file upload
@@ -147,7 +174,7 @@ export default function IBKRTracker() {
         reader.onload = (event) => {
             try {
                 const content = event.target?.result as string;
-                const parsed = parseCSV(content);
+                const parsed = parseCSV(content, file.name);
                 if (parsed.length === 0) {
                     setError('No valid trades found in CSV');
                     return;
