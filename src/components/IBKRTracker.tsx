@@ -11,6 +11,7 @@ interface Trade {
     price: number;
     totalValue: number;
     importedAt: string;
+    account?: string; // Track which account this trade belongs to
 }
 
 interface Position {
@@ -250,9 +251,12 @@ export default function IBKRTracker() {
             ? executionTrades
             : executionTrades.filter(t => t.account === selectedAccount);
 
-        // Combine with manual trades (avoiding duplicates if possible, but manual trades usually distinct)
-        // For simplicity, we just concatenate. Users should avoid manual entry if TWS is live.
-        return [...visibleExecutions, ...trades].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        const visibleManualTrades = selectedAccount === 'ALL'
+            ? trades
+            : trades.filter(t => t.account === selectedAccount);
+
+        // Combine
+        return [...visibleExecutions, ...visibleManualTrades].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
     }, [trades, twsExecutions, positions, selectedAccount]);
 
@@ -375,12 +379,31 @@ export default function IBKRTracker() {
             // Col 0: Action (BUY/SELL)
             // Col 1: Quantity
             // Col 2: Symbol
-            // Col 15: BasketTag (NDX, R1000, RUI, etc.)
+            // ...
+            // Col 10: LmtPrice (or Market if empty/0)
+            // Col 15: BasketTag (NDX, RUI)
+            // Col 16: Account (Optional)
             const action = cols[0]?.toUpperCase();
             const quantity = parseFloat(cols[1]) || 0;
             const symbol = cols[2] || '';
-            const price = parseFloat(cols[10]) || 0; // LmtPrice
+            let price = parseFloat(cols[10]) || 0; // LmtPrice
             const basketTag = cols[15] || '';
+            let account = cols[16] || '';
+
+            // Fallback: Use selected account if CSV doesn't specify
+            if (!account && selectedAccount !== 'ALL') {
+                account = selectedAccount;
+            }
+
+            // Fallback: If price is 0, try to find AvgCost from Live Positions
+            if (price === 0) {
+                // Find matching position in TWS data (live)
+                // We search in all live positions, effectively matching symbol
+                const livePos = twsPositions.find(p => p.symbol === symbol && (!account || p.account === account));
+                if (livePos && livePos.avgCost > 0) {
+                    price = livePos.avgCost; // Use live average cost as best estimate
+                }
+            }
 
             // Determine system from BasketTag
             const system = detectSystem(basketTag);
@@ -391,10 +414,11 @@ export default function IBKRTracker() {
                 symbol: symbol,
                 action: action === 'BUY' ? 'BUY' : 'SELL',
                 quantity: Math.abs(quantity),
-                price: price, // Use parsed price
+                price: price, // Use parsed price or AvgCost fallback
                 totalValue: Math.abs(quantity) * price,
                 system: system,
-                importedAt: new Date().toISOString()
+                importedAt: new Date().toISOString(),
+                account: account
             };
 
             if (trade.symbol && trade.quantity > 0) {
