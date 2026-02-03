@@ -163,6 +163,15 @@ const AllWeatherCalculator: React.FC = () => {
                         } else {
                             log(`IGLN WARNING: Could not find deep price. Using default: ${price}`);
                         }
+
+                        // HYBRID FAILSAFE (v1.3.2): If the price is STILL wrong (>95), use the proven 1.083 fix.
+                        // This handles cases where 'indicators' is missing or empty in the browser response.
+                        if (price > 95) {
+                            const anomalyFactor = 1.083;
+                            const original = price;
+                            price = price / anomalyFactor;
+                            log(`IGLN FAILSAFE APPLIED: ${original.toFixed(4)} -> ${price.toFixed(4)} (Factor ${anomalyFactor})`);
+                        }
                     }
 
                     log(`RAW FETCH ${tick}: Price=${price}, Currency=${currency}`);
