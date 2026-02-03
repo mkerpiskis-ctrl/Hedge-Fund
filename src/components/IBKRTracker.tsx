@@ -543,9 +543,36 @@ export default function IBKRTracker() {
         ? positions
         : positions.filter(p => p.systems.includes(systemFilter));
 
-    // Calculate totals
-    const totalMarketValue = filteredPositions.reduce((sum, p) => sum + (p.marketValue || 0), 0);
-    const totalPnL = filteredPositions.reduce((sum, p) => sum + (p.pnl || 0), 0);
+    // MERGE LOGIC: Combine TWS Live Data with Manual System Tags
+    const finalPositions = (twsConnected && selectedAccount !== 'ALL')
+        ? displayedTwsPositions.map(twsPos => {
+            // Find matching manual position to get System tags (NDX/RUI)
+            const manualMatch = positions.find(p => p.symbol === twsPos.symbol);
+            const systems = manualMatch ? manualMatch.systems : ['TWS']; // Default to TWS if unknown
+
+            // Reuse price from manual fetch if available, otherwise would need separate fetch
+            // Ideally we should add TWS symbols to the fetch list
+            const currentPrice = manualMatch?.currentPrice || null;
+            const marketValue = currentPrice ? (currentPrice * twsPos.position) : null;
+            const pnl = (currentPrice && marketValue) ? (marketValue - (twsPos.avgCost * twsPos.position)) : null;
+            const pnlPercent = (currentPrice && twsPos.avgCost) ? ((currentPrice - twsPos.avgCost) / twsPos.avgCost) * 100 : null;
+
+            return {
+                symbol: twsPos.symbol,
+                systems,
+                quantity: twsPos.position,
+                avgCost: twsPos.avgCost,
+                currentPrice,
+                marketValue,
+                pnl,
+                pnlPercent
+            };
+        }).filter(p => systemFilter === 'ALL' || p.systems.includes(systemFilter))
+        : filteredPositions;
+
+    // Calculate totals based on FINAL positions (Live or Manual)
+    const totalMarketValue = finalPositions.reduce((sum, p) => sum + (p.marketValue || 0), 0);
+    const totalPnL = finalPositions.reduce((sum, p) => sum + (p.pnl || 0), 0);
     const totalEquity = cashBalance + totalMarketValue;
 
     return (
@@ -809,8 +836,8 @@ export default function IBKRTracker() {
                                             </td>
                                             <td className="py-2 text-center">
                                                 <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${p.action === 'BUY' ? 'bg-emerald-500/20 text-emerald-400' :
-                                                        p.action === 'SELL' ? 'bg-rose-500/20 text-rose-400' :
-                                                            'bg-slate-600/20 text-slate-500'
+                                                    p.action === 'SELL' ? 'bg-rose-500/20 text-rose-400' :
+                                                        'bg-slate-600/20 text-slate-500'
                                                     }`}>
                                                     {p.action}
                                                 </span>
@@ -861,9 +888,11 @@ export default function IBKRTracker() {
             )}
 
             {/* Current Positions */}
-            {filteredPositions.length > 0 && (
+            {finalPositions.length > 0 && (
                 <div className="bg-slate-800/30 rounded-lg p-4 border border-slate-700">
-                    <h4 className="text-slate-300 font-semibold mb-3">Current Positions</h4>
+                    <h4 className="text-slate-300 font-semibold mb-3">
+                        {twsConnected && selectedAccount !== 'ALL' ? 'Live TWS Positions 🟢' : 'Current Positions'}
+                    </h4>
                     <div className="overflow-x-auto">
                         <table className="w-full text-xs">
                             <thead className="text-slate-500 uppercase">
@@ -879,8 +908,8 @@ export default function IBKRTracker() {
                                 </tr>
                             </thead>
                             <tbody className="text-slate-300">
-                                {filteredPositions.map(p => (
-                                    <tr key={p.symbol} className="border-t border-slate-700/50 hover:bg-slate-700/20">
+                                {finalPositions.map(p => (
+                                    <tr key={p.symbol} className={`border-t border-slate-700/50 hover:bg-slate-700/20 ${twsConnected && selectedAccount !== 'ALL' ? 'bg-slate-800/40' : ''}`}>
                                         <td className="py-2 font-mono font-bold">{p.symbol}</td>
                                         <td className="py-2">
                                             {p.systems.length > 1 ? (
@@ -888,63 +917,74 @@ export default function IBKRTracker() {
                                                     {p.systems.join(' + ')}
                                                 </span>
                                             ) : (
-                                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${p.systems[0] === 'NDX' ? 'bg-blue-500/20 text-blue-400' : 'bg-purple-500/20 text-purple-400'}`}>
+                                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${p.systems[0] === 'NDX' ? 'bg-blue-500/20 text-blue-400' : p.systems[0] === 'RUI' ? 'bg-purple-500/20 text-purple-400' : 'bg-slate-500/20 text-slate-400'}`}>
                                                     {p.systems[0]}
                                                 </span>
                                             )}
                                         </td>
                                         <td className="py-2 text-right">
-                                            {editingPositionSymbol === p.symbol ? (
-                                                <input
-                                                    type="number"
-                                                    defaultValue={p.quantity}
-                                                    className="w-16 bg-slate-700 text-slate-100 px-1 py-0.5 rounded text-right text-xs"
-                                                    onBlur={(e) => updatePosition(p.symbol, { quantity: parseFloat(e.target.value) || 0 })}
-                                                    autoFocus
-                                                />
+                                            {twsConnected && selectedAccount !== 'ALL' ? (
+                                                <span className="font-bold text-slate-200">{p.quantity.toFixed(2)}</span>
                                             ) : (
-                                                <span onClick={() => setEditingPositionSymbol(p.symbol)} className="cursor-pointer hover:text-amber-400">{p.quantity.toFixed(2)}</span>
+                                                editingPositionSymbol === p.symbol ? (
+                                                    <input
+                                                        type="number"
+                                                        defaultValue={p.quantity}
+                                                        className="w-16 bg-slate-700 text-slate-100 px-1 py-0.5 rounded text-right text-xs"
+                                                        onBlur={(e) => updatePosition(p.symbol, { quantity: parseFloat(e.target.value) || 0 })}
+                                                        autoFocus
+                                                    />
+                                                ) : (
+                                                    <span onClick={() => setEditingPositionSymbol(p.symbol)} className="cursor-pointer hover:text-amber-400">{p.quantity.toFixed(2)}</span>
+                                                )
                                             )}
                                         </td>
                                         <td className="py-2 text-right">
-                                            {editingPositionSymbol === p.symbol ? (
-                                                <input
-                                                    type="number"
-                                                    defaultValue={p.avgCost}
-                                                    className="w-20 bg-slate-700 text-slate-100 px-1 py-0.5 rounded text-right text-xs"
-                                                    onBlur={(e) => updatePosition(p.symbol, { avgCost: parseFloat(e.target.value) || 0 })}
-                                                />
+                                            {twsConnected && selectedAccount !== 'ALL' ? (
+                                                <span>${p.avgCost.toFixed(2)}</span>
                                             ) : (
-                                                <span onClick={() => setEditingPositionSymbol(p.symbol)} className="cursor-pointer hover:text-amber-400">${p.avgCost.toFixed(2)}</span>
+                                                editingPositionSymbol === p.symbol ? (
+                                                    <input
+                                                        type="number"
+                                                        defaultValue={p.avgCost}
+                                                        className="w-16 bg-slate-700 text-slate-100 px-1 py-0.5 rounded text-right text-xs"
+                                                        onBlur={(e) => updatePosition(p.symbol, { avgCost: parseFloat(e.target.value) || 0 })}
+                                                    />
+                                                ) : (
+                                                    <span onClick={() => setEditingPositionSymbol(p.symbol)} className="cursor-pointer hover:text-amber-400">${p.avgCost.toFixed(2)}</span>
+                                                )
                                             )}
                                         </td>
-                                        <td className="py-2 text-right">{p.currentPrice ? `$${p.currentPrice.toFixed(2)}` : '—'}</td>
-                                        <td className="py-2 text-right">{p.marketValue ? `$${p.marketValue.toLocaleString()}` : '—'}</td>
-                                        <td className={`py-2 text-right font-bold ${(p.pnl ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                            {p.pnl !== null ? `${p.pnl >= 0 ? '+' : ''}$${p.pnl.toFixed(0)}` : '—'}
-                                            {p.pnlPercent !== null && (
-                                                <span className="text-slate-500 ml-1">({p.pnlPercent >= 0 ? '+' : ''}{p.pnlPercent.toFixed(1)}%)</span>
-                                            )}
+                                        <td className="py-2 text-right text-slate-400">
+                                            ${p.currentPrice ? p.currentPrice.toFixed(2) : '-'}
                                         </td>
-                                        <td className="py-2 text-center">
-                                            <button
-                                                onClick={() => setEditingPositionSymbol(editingPositionSymbol === p.symbol ? null : p.symbol)}
-                                                className="text-slate-500 hover:text-amber-400 mr-2"
-                                                title="Edit"
-                                            >
-                                                ✏️
-                                            </button>
-                                            <button
-                                                onClick={() => {
-                                                    if (confirm(`Delete position ${p.symbol}?`)) {
-                                                        deletePosition(p.symbol);
-                                                    }
-                                                }}
-                                                className="text-slate-500 hover:text-rose-400"
-                                                title="Delete"
-                                            >
-                                                🗑️
-                                            </button>
+                                        <td className="py-2 text-right font-medium">
+                                            ${p.marketValue ? p.marketValue.toLocaleString(undefined, { maximumFractionDigits: 0 }) : '-'}
+                                        </td>
+                                        <td className={`py-2 text-right font-bold ${(p.pnl || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                                            }`}>
+                                            {(p.pnl || 0) >= 0 ? '+' : ''}${p.pnl ? p.pnl.toLocaleString(undefined, { maximumFractionDigits: 0 }) : '-'}
+                                            <span className="text-[10px] ml-1 opacity-70">
+                                                ({(p.pnlPercent || 0) >= 0 ? '+' : ''}{p.pnlPercent ? p.pnlPercent.toFixed(1) : '-'}%)
+                                            </span>
+                                        </td>
+                                        <td className="py-2 text-center text-slate-600">
+                                            {twsConnected && selectedAccount !== 'ALL' ? (
+                                                <div className="group relative inline-block">
+                                                    <span className="cursor-not-allowed">🔒</span>
+                                                    <div className="invisible group-hover:visible absolute right-0 w-32 bg-slate-900 text-slate-400 text-xs p-1 rounded z-10 border border-slate-700">
+                                                        Managed by TWS
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <button
+                                                    onClick={() => deletePosition(p.symbol)}
+                                                    className="hover:text-rose-400 transition-colors"
+                                                    title="Delete Position"
+                                                >
+                                                    🗑️
+                                                </button>
+                                            )}
                                         </td>
                                     </tr>
                                 ))}
