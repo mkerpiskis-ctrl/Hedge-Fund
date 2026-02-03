@@ -1148,7 +1148,9 @@ export default function IBKRTracker() {
                                     <th className="text-right py-2">Cost Basis</th>
                                     <th className="text-right py-2">Current</th>
                                     <th className="text-right py-2">P&L</th>
-                                    <th className="text-center py-2">Actions</th>
+                                    {!(twsConnected && selectedAccount !== 'ALL') && (
+                                        <th className="text-center py-2">Actions</th>
+                                    )}
                                 </tr>
                             </thead>
                             <tbody className="text-slate-300">
@@ -1216,15 +1218,8 @@ export default function IBKRTracker() {
                                                 ({(p.pnlPercent || 0) >= 0 ? '+' : ''}{p.pnlPercent ? p.pnlPercent.toFixed(1) : '-'}%)
                                             </span>
                                         </td>
-                                        <td className="py-2 text-center text-slate-600">
-                                            {twsConnected && selectedAccount !== 'ALL' ? (
-                                                <div className="group relative inline-block">
-                                                    <span className="cursor-not-allowed">🔒</span>
-                                                    <div className="invisible group-hover:visible absolute right-0 w-32 bg-slate-900 text-slate-400 text-xs p-1 rounded z-10 border border-slate-700">
-                                                        Managed by TWS
-                                                    </div>
-                                                </div>
-                                            ) : (
+                                        {!(twsConnected && selectedAccount !== 'ALL') && (
+                                            <td className="py-2 text-center text-slate-600">
                                                 <button
                                                     onClick={() => deletePosition(p.symbol)}
                                                     className="hover:text-rose-400 transition-colors"
@@ -1232,8 +1227,8 @@ export default function IBKRTracker() {
                                                 >
                                                     🗑️
                                                 </button>
-                                            )}
-                                        </td>
+                                            </td>
+                                        )}
                                     </tr>
                                 ))}
                             </tbody>
