@@ -113,8 +113,9 @@ const AllWeatherCalculator: React.FC = () => {
         }
 
         // Fetch Live
-        // v1.3.6: Returned to range=5d (proven data) but keeping Caching (proven stability)
-        const targetUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=5d`;
+        // v1.4.0: Using range=1mo to ensure we ALWAYS get the latest trading day's data
+        // (range=5d was inconsistent on weekends/holidays)
+        const targetUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1mo`;
         const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
 
         const res = await fetch(proxyUrl);
