@@ -68,6 +68,7 @@ export default function IBKRTracker() {
     const [csvPreview, setCsvPreview] = useState<Trade[] | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [editingTradeId, setEditingTradeId] = useState<string | null>(null);
+    const [editingTradePriceId, setEditingTradePriceId] = useState<string | null>(null);
     const [editingPositionSymbol, setEditingPositionSymbol] = useState<string | null>(null);
 
     // TWS Bridge state
@@ -1259,15 +1260,19 @@ export default function IBKRTracker() {
                                             {t.isExecution ? (
                                                 <span className="text-slate-400">${t.price.toFixed(2)}</span>
                                             ) : (
-                                                editingTradeId === t.id ? (
+                                                editingTradePriceId === t.id ? (
                                                     <input
                                                         type="number"
                                                         defaultValue={t.price}
                                                         className="w-20 bg-slate-700 text-slate-100 px-1 py-0.5 rounded text-right text-xs"
-                                                        onBlur={(e) => updateTrade(t.id, { price: parseFloat(e.target.value) || 0 })}
+                                                        onBlur={(e) => {
+                                                            updateTrade(t.id, { price: parseFloat(e.target.value) || 0 });
+                                                            setEditingTradePriceId(null);
+                                                        }}
+                                                        autoFocus
                                                     />
                                                 ) : (
-                                                    <span onClick={() => setEditingTradeId(t.id)} className="cursor-pointer hover:text-amber-400">${t.price.toFixed(2)}</span>
+                                                    <span onClick={() => setEditingTradePriceId(t.id)} className="cursor-pointer hover:text-amber-400">${t.price.toFixed(2)}</span>
                                                 )
                                             )}
                                         </td>
