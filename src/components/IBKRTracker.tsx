@@ -455,7 +455,7 @@ export default function IBKRTracker() {
         const tag = basketTag.toUpperCase();
         // 2. Check BasketTag
         if (tag.includes('NDX') || tag.includes('NASDAQ')) return 'NDX';
-        if (tag.includes('RUI') || tag.includes('RUSSELL')) return 'RUI';
+        if (tag.includes('RUI') || tag.includes('RUSSELL') || tag.includes('R1000')) return 'RUI';
 
         // 3. Fallback to Filename
         if (filename) {
