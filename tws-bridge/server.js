@@ -21,6 +21,7 @@ let ib = null;
 let isConnected = false;
 let accountData = {};
 let positions = [];
+let executions = [];
 let accountIds = new Set();
 let lastError = null;
 
@@ -45,6 +46,10 @@ function connectToTWS() {
 
         // Also request managed accounts
         ib.reqManagedAccts();
+
+        // Request executions (Trade History)
+        console.log('[TWS Bridge] Requesting executions...');
+        ib.reqExecutions({}); // Empty filter = all executions
     });
 
     ib.on(EventName.disconnected, () => {
@@ -116,6 +121,39 @@ function connectToTWS() {
     ib.on(EventName.positionEnd, () => {
         positions = positions.filter(p => p.position !== 0);
         console.log(`[TWS Bridge] Positions updated: ${positions.length} open positions`);
+    });
+
+    // Execution details (Trade History)
+    ib.on(EventName.execDetails, (reqId, contract, execution) => {
+        // Avoid duplicates
+        const exists = executions.some(e => e.execId === execution.execId);
+        if (!exists) {
+            executions.push({
+                execId: execution.execId,
+                time: execution.time,
+                acctNumber: execution.acctNumber,
+                exchange: execution.exchange,
+                side: execution.side,
+                shares: execution.shares,
+                price: execution.price,
+                permId: execution.permId,
+                liquidation: execution.liquidation,
+                cumQty: execution.cumQty,
+                avgPrice: execution.avgPrice,
+                orderRef: execution.orderRef,
+                evRule: execution.evRule,
+                evMultiplier: execution.evMultiplier,
+                modelCode: execution.modelCode,
+                lastLiquidity: execution.lastLiquidity,
+                symbol: contract.symbol,
+                secType: contract.secType,
+                currency: contract.currency
+            });
+        }
+    });
+
+    ib.on(EventName.execDetailsEnd, (reqId) => {
+        console.log(`[TWS Bridge] Executions updated: ${executions.length} trades found`);
     });
 
     // Connect
@@ -198,6 +236,20 @@ app.get('/api/positions', (req, res) => {
     }
 
     res.json(positions);
+});
+
+app.get('/api/executions', (req, res) => {
+    if (!isConnected) {
+        return res.status(503).json({ error: 'Not connected to TWS' });
+    }
+
+    // Optional filter by account
+    const { account } = req.query;
+    if (account) {
+        return res.json(executions.filter(e => e.acctNumber === account));
+    }
+
+    res.json(executions);
 });
 
 // Request fresh account update

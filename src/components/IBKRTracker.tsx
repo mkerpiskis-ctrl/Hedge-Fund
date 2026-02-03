@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 
 // Types
 interface Trade {
@@ -74,6 +74,7 @@ export default function IBKRTracker() {
     const [twsPositions, setTwsPositions] = useState<TWSPosition[]>([]);
     const [twsTotals, setTwsTotals] = useState<{ netLiquidation: number; totalCashValue: number; unrealizedPnL: number } | null>(null);
     const [twsError, setTwsError] = useState<string | null>(null);
+    const [twsExecutions, setTwsExecutions] = useState<any[]>([]);
     const [selectedAccount, setSelectedAccount] = useState<string>('ALL'); // 'ALL' or specific account ID
     const [isRebalanceMode, setIsRebalanceMode] = useState(false);
     const [rebalancePreview, setRebalancePreview] = useState<{
@@ -162,6 +163,13 @@ export default function IBKRTracker() {
                 setTwsPositions(posData);
             }
 
+            // Fetch executions
+            const execRes = await fetch(`${TWS_BRIDGE_URL}/api/executions`);
+            if (execRes.ok) {
+                const execData = await execRes.json();
+                setTwsExecutions(execData);
+            }
+
             setTwsError(null);
         } catch (err) {
             setTwsError(err instanceof Error ? err.message : 'Failed to connect to TWS Bridge');
@@ -182,6 +190,47 @@ export default function IBKRTracker() {
     const displayedTwsPositions = selectedAccount === 'ALL'
         ? twsPositions
         : twsPositions.filter(p => p.account === selectedAccount);
+
+    // Merge Trades Logic
+    const finalTrades = useMemo(() => {
+        // If TWS connected and account selected, show TWS Executions merged with manual trades?
+        // OR just simple merge. User asked "trade history too".
+
+        // Let's create Trade objects from executions
+        const executionTrades = twsExecutions.map(e => {
+            // Determine system from existing positions or manual trades
+            const knownTrade = trades.find(t => t.symbol === e.symbol);
+            const knownPos = positions.find(p => p.symbol === e.symbol);
+            const system = knownTrade ? knownTrade.system : (knownPos && knownPos.systems ? knownPos.systems[0] : 'TWS');
+
+            const dateStr = e.time.substring(0, 8); // YYYYMMDD
+            const formattedDate = `${dateStr.substring(0, 4)}-${dateStr.substring(4, 6)}-${dateStr.substring(6, 8)}`;
+
+            return {
+                id: `exec_${e.execId}`,
+                date: formattedDate,
+                system: system as 'NDX' | 'RUI',
+                symbol: e.symbol,
+                action: e.side === 'BOT' ? 'BUY' : 'SELL' as 'BUY' | 'SELL',
+                quantity: e.shares,
+                price: e.price,
+                totalValue: e.shares * e.price,
+                importedAt: new Date().toISOString(),
+                isExecution: true, // Flag to identify TWS data
+                account: e.acctNumber
+            };
+        });
+
+        // Filter by account if selected
+        const visibleExecutions = selectedAccount === 'ALL'
+            ? executionTrades
+            : executionTrades.filter(t => t.account === selectedAccount);
+
+        // Combine with manual trades (avoiding duplicates if possible, but manual trades usually distinct)
+        // For simplicity, we just concatenate. Users should avoid manual entry if TWS is live.
+        return [...visibleExecutions, ...trades].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+    }, [trades, twsExecutions, positions, selectedAccount]);
 
     // Auto-fetch TWS data on mount and every 30 seconds
     useEffect(() => {
@@ -534,10 +583,7 @@ export default function IBKRTracker() {
         return Array.from(posMap.values());
     };
 
-    // Filter trades by system
-    const filteredTrades = systemFilter === 'ALL'
-        ? trades
-        : trades.filter(t => t.system === systemFilter);
+
 
     const filteredPositions = systemFilter === 'ALL'
         ? positions
@@ -1016,18 +1062,20 @@ export default function IBKRTracker() {
             )}
 
             {/* Trade History */}
-            {filteredTrades.length > 0 && (
+            {finalTrades.length > 0 && (
                 <div className="bg-slate-800/30 rounded-lg p-4 border border-slate-700">
                     <div className="flex items-center justify-between mb-3">
-                        <h4 className="text-slate-300 font-semibold">Trade History</h4>
+                        <h4 className="text-slate-300 font-semibold">Trade History (Live & Manual)</h4>
                         <div className="flex items-center space-x-3">
-                            <span className="text-xs text-slate-500">{filteredTrades.length} trades</span>
-                            <button
-                                onClick={clearAllData}
-                                className="px-2 py-1 text-[10px] bg-rose-600/20 text-rose-400 rounded hover:bg-rose-600/30 border border-rose-600/30"
-                            >
-                                Clear All
-                            </button>
+                            <span className="text-xs text-slate-500">{finalTrades.length} trades</span>
+                            {!twsConnected && (
+                                <button
+                                    onClick={clearAllData}
+                                    className="px-2 py-1 text-[10px] bg-rose-600/20 text-rose-400 rounded hover:bg-rose-600/30 border border-rose-600/30"
+                                >
+                                    Clear All
+                                </button>
+                            )}
                         </div>
                     </div>
                     <div className="max-h-64 overflow-y-auto">
@@ -1041,15 +1089,18 @@ export default function IBKRTracker() {
                                     <th className="text-right py-2">Qty</th>
                                     <th className="text-right py-2">Price</th>
                                     <th className="text-right py-2">Total</th>
-                                    <th className="text-center py-2">Del</th>
+                                    <th className="text-center py-2">Actions</th>
                                 </tr>
                             </thead>
                             <tbody className="text-slate-300">
-                                {[...filteredTrades].reverse().map(t => (
-                                    <tr key={t.id} className="border-t border-slate-700/50 hover:bg-slate-700/20">
-                                        <td className="py-2">{t.date}</td>
+                                {finalTrades.map((t: any) => (
+                                    <tr key={t.id} className={`border-t border-slate-700/50 hover:bg-slate-700/20 ${t.isExecution ? 'bg-slate-800/40' : ''}`}>
                                         <td className="py-2">
-                                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${t.system === 'NDX' ? 'bg-blue-500/20 text-blue-400' : 'bg-purple-500/20 text-purple-400'
+                                            {t.date}
+                                            {t.isExecution && <span className="ml-1 text-[10px] text-blue-400">⚡</span>}
+                                        </td>
+                                        <td className="py-2">
+                                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${t.system === 'NDX' ? 'bg-blue-500/20 text-blue-400' : t.system === 'RUI' ? 'bg-purple-500/20 text-purple-400' : 'bg-slate-500/20 text-slate-400'
                                                 }`}>{t.system}</span>
                                         </td>
                                         <td className="py-2 font-mono">{t.symbol}</td>
@@ -1057,39 +1108,51 @@ export default function IBKRTracker() {
                                             {t.action}
                                         </td>
                                         <td className="py-2 text-right">
-                                            {editingTradeId === t.id ? (
-                                                <input
-                                                    type="number"
-                                                    defaultValue={t.quantity}
-                                                    className="w-16 bg-slate-700 text-slate-100 px-1 py-0.5 rounded text-right text-xs"
-                                                    onBlur={(e) => updateTrade(t.id, { quantity: parseFloat(e.target.value) || 0 })}
-                                                    autoFocus
-                                                />
+                                            {t.isExecution ? (
+                                                <span className="text-slate-400">{t.quantity.toFixed(2)}</span>
                                             ) : (
-                                                <span onClick={() => setEditingTradeId(t.id)} className="cursor-pointer hover:text-amber-400">{t.quantity.toFixed(2)}</span>
+                                                editingTradeId === t.id ? (
+                                                    <input
+                                                        type="number"
+                                                        defaultValue={t.quantity}
+                                                        className="w-16 bg-slate-700 text-slate-100 px-1 py-0.5 rounded text-right text-xs"
+                                                        onBlur={(e) => updateTrade(t.id, { quantity: parseFloat(e.target.value) || 0 })}
+                                                        autoFocus
+                                                    />
+                                                ) : (
+                                                    <span onClick={() => setEditingTradeId(t.id)} className="cursor-pointer hover:text-amber-400">{t.quantity.toFixed(2)}</span>
+                                                )
                                             )}
                                         </td>
                                         <td className="py-2 text-right">
-                                            {editingTradeId === t.id ? (
-                                                <input
-                                                    type="number"
-                                                    defaultValue={t.price}
-                                                    className="w-20 bg-slate-700 text-slate-100 px-1 py-0.5 rounded text-right text-xs"
-                                                    onBlur={(e) => updateTrade(t.id, { price: parseFloat(e.target.value) || 0 })}
-                                                />
+                                            {t.isExecution ? (
+                                                <span className="text-slate-400">${t.price.toFixed(2)}</span>
                                             ) : (
-                                                <span onClick={() => setEditingTradeId(t.id)} className="cursor-pointer hover:text-amber-400">${t.price.toFixed(2)}</span>
+                                                editingTradeId === t.id ? (
+                                                    <input
+                                                        type="number"
+                                                        defaultValue={t.price}
+                                                        className="w-20 bg-slate-700 text-slate-100 px-1 py-0.5 rounded text-right text-xs"
+                                                        onBlur={(e) => updateTrade(t.id, { price: parseFloat(e.target.value) || 0 })}
+                                                    />
+                                                ) : (
+                                                    <span onClick={() => setEditingTradeId(t.id)} className="cursor-pointer hover:text-amber-400">${t.price.toFixed(2)}</span>
+                                                )
                                             )}
                                         </td>
                                         <td className="py-2 text-right">${t.totalValue.toLocaleString()}</td>
                                         <td className="py-2 text-center">
-                                            <button
-                                                onClick={() => deleteTrade(t.id)}
-                                                className="text-slate-500 hover:text-rose-400"
-                                                title="Delete trade"
-                                            >
-                                                ✕
-                                            </button>
+                                            {t.isExecution ? (
+                                                <span className="text-slate-600 cursor-not-allowed" title="TWS Execution (Read-only)">🔒</span>
+                                            ) : (
+                                                <button
+                                                    onClick={() => deleteTrade(t.id)}
+                                                    className="text-slate-500 hover:text-rose-400"
+                                                    title="Delete trade"
+                                                >
+                                                    ✕
+                                                </button>
+                                            )}
                                         </td>
                                     </tr>
                                 ))}
