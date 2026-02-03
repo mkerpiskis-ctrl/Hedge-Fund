@@ -76,120 +76,146 @@ const AllWeatherCalculator: React.FC = () => {
 
     const [isRefreshing, setIsRefreshing] = useState(false);
 
+    // Cache configuration
+    const CACHE_PREFIX = 'aw_price_cache_v1_';
+    const CACHE_DURATION = 10 * 60 * 1000; // 10 minutes
+
+    const getCachedPrice = (ticker: string): { price: number, currency: string, source: string, timestamp: number } | null => {
+        try {
+            const saved = localStorage.getItem(CACHE_PREFIX + ticker);
+            if (!saved) return null;
+            const parsed = JSON.parse(saved);
+            if (Date.now() - parsed.timestamp < CACHE_DURATION) {
+                return parsed;
+            }
+        } catch (e) {
+            return null;
+        }
+        return null;
+    };
+
+    const setCachedPrice = (ticker: string, data: any) => {
+        try {
+            localStorage.setItem(CACHE_PREFIX + ticker, JSON.stringify({ ...data, timestamp: Date.now() }));
+        } catch (e) { }
+    };
+
+    const fetchYahooData = async (ticker: string) => {
+        // Try Cache First
+        const cached = getCachedPrice(ticker);
+        if (cached) {
+            return { ...cached, fromCache: true };
+        }
+
+        // Fetch Live
+        // v1.3.5: Using /raw endpoint + range=2d to reduce load and avoid "Failed to fetch"
+        const targetUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=2d`;
+        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
+
+        const res = await fetch(proxyUrl);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        const yahooData = await res.json();
+        const result = yahooData.chart?.result?.[0];
+        const meta = result?.meta;
+
+        let price = meta?.regularMarketPrice || meta?.chartPreviousClose || meta?.previousClose;
+        let currency = meta?.currency;
+
+        // CLEAN IGLN/Gold Logic (v3)
+        if (ticker.includes('IGLN') || ticker === 'IGLN.L' || (result?.meta?.symbol === 'IGLN.L')) {
+            const indicators = result?.indicators;
+            let foundPrice = null;
+
+            // Priority 1: AdjClose
+            const adjCloseArr = indicators?.adjclose?.[0]?.adjclose;
+            if (Array.isArray(adjCloseArr)) {
+                const valid = adjCloseArr.filter((n: any) => typeof n === 'number');
+                if (valid.length > 0) foundPrice = valid[valid.length - 1];
+            }
+
+            // Priority 2: Quote Close
+            if (!foundPrice) {
+                const closeArr = indicators?.quote?.[0]?.close;
+                if (Array.isArray(closeArr)) {
+                    const valid = closeArr.filter((n: any) => typeof n === 'number');
+                    if (valid.length > 0) foundPrice = valid[valid.length - 1];
+                }
+            }
+
+            if (foundPrice) {
+                price = foundPrice;
+            }
+        }
+
+        const data = { price, currency, source: 'yahoo' };
+        setCachedPrice(ticker, data);
+        return { ...data, fromCache: false };
+    };
+
     const fetchPrices = async () => {
         setIsRefreshing(true);
         const newAssets = [...assets];
-
-        // Fetch FX rates first
-        let eurUsd = 1.083; // fallback (Updated Feb 2026)
-        let gbpUsd = 1.25; // fallback
-        try {
-            // Note: Fetch individually to be safe.
-            const resEUR = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent('https://query1.finance.yahoo.com/v8/finance/chart/EURUSD=X?interval=1d&range=1d')}`);
-            const dataEUR = await resEUR.json();
-            const jsonEUR = JSON.parse(dataEUR.contents);
-            eurUsd = jsonEUR.chart.result[0].meta.regularMarketPrice || eurUsd;
-
-            const resGBP = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent('https://query1.finance.yahoo.com/v8/finance/chart/GBPUSD=X?interval=1d&range=1d')}`);
-            const dataGBP = await resGBP.json();
-            const jsonGBP = JSON.parse(dataGBP.contents);
-            gbpUsd = jsonGBP.chart.result[0].meta.regularMarketPrice || gbpUsd;
-        } catch (e) {
-            console.error("FX Fetch Error", e);
-        }
-
-        setDebugLogs([]); // Clear logs
+        setDebugLogs([]);
         const logs: string[] = [];
         const log = (msg: string) => logs.push(msg);
-        log(`FX Rates: EUR=${eurUsd.toFixed(4)}, GBP=${gbpUsd.toFixed(4)}`);
 
+        // Fetch FX (Sequential)
+        let eurUsd = 1.083;
+        let gbpUsd = 1.25;
+
+        try {
+            const fxEUR = await fetchYahooData('EURUSD=X');
+            if (fxEUR?.price) eurUsd = fxEUR.price;
+
+            const fxGBP = await fetchYahooData('GBPUSD=X');
+            if (fxGBP?.price) gbpUsd = fxGBP.price;
+        } catch (e) {
+            log(`FX Error: ${e}`);
+        }
+
+        log(`FX: EUR=${eurUsd.toFixed(4)}, GBP=${gbpUsd.toFixed(4)}`);
+
+        // Fetch Assets
         for (let i = 0; i < newAssets.length; i++) {
             const asset = newAssets[i];
-            let listTicker = asset.ticker;
-            if (listTicker === 'BTC') listTicker = 'BTC-USD';
+            let ticker = asset.ticker.trim();
+            if (ticker === 'BTC') ticker = 'BTC-USD';
 
             try {
-                const timestamp = new Date().getTime();
-                // v1.3.4 CLEAN SOURCE: Using range=5d to ensure we get valid indicators data (AdjClose).
-                const response = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(`https://query1.finance.yahoo.com/v8/finance/chart/${listTicker}?interval=1d&range=5d`)}&timestamp=${timestamp}`);
-                const data = await response.json();
+                const data = await fetchYahooData(ticker);
+                let price = data.price;
+                const currency = data.currency;
 
-                if (data.contents) {
-                    const yahooData = JSON.parse(data.contents);
-                    const meta = yahooData.chart?.result?.[0]?.meta;
-                    let price = meta?.regularMarketPrice || meta?.chartPreviousClose || meta?.previousClose;
-                    let currency = meta?.currency;
+                if (data.fromCache) {
+                    // log(`Using Cache for ${ticker}`);
+                }
 
-                    // Manual overrides for known USD tickers on LSE/Xetra
-                    const tick = asset.ticker.trim();
-
-                    // Debug IGLN specific field data
-                    if (tick.includes('IGLN') || asset.id === 'gold') {
-                        // CLEAN FIX v3 (v1.3.4): Source Data Extraction
-                        const result = yahooData.chart?.result?.[0];
-                        const indicators = result?.indicators;
-
-                        let foundPrice = null;
-
-                        // Priority 1: AdjClose
-                        const adjCloseArr = indicators?.adjclose?.[0]?.adjclose;
-                        if (Array.isArray(adjCloseArr)) {
-                            const valid = adjCloseArr.filter((n: any) => typeof n === 'number');
-                            if (valid.length > 0) {
-                                foundPrice = valid[valid.length - 1]; // Last non-null value
-                            }
-                        }
-
-                        // Priority 2: Quote Close
-                        if (!foundPrice) {
-                            const closeArr = indicators?.quote?.[0]?.close;
-                            if (Array.isArray(closeArr)) {
-                                const valid = closeArr.filter((n: any) => typeof n === 'number');
-                                if (valid.length > 0) {
-                                    foundPrice = valid[valid.length - 1];
-                                }
-                            }
-                        }
-
-                        if (foundPrice) {
-                            price = foundPrice;
-                        } else {
-                            log(`IGLN WARNING: Source extraction failed.`);
-                        }
-                    }
-
-                    log(`RAW FETCH ${tick}: Price=${price}, Currency=${currency}`);
-
-                    // Apply if IGLN
-                    if (tick.includes('IGLN') || asset.id === 'gold') {
-                        if (price) {
-                            newAssets[i].currency = 'USD'; // Force display as USD
-                            newAssets[i].price = typeof price === 'number' ? price.toFixed(4) : price;
-                            newAssets[i].isLocked = true;
-                        }
+                if (price) {
+                    // IGLN Force USD Display
+                    if (ticker.includes('IGLN') || asset.id === 'gold') {
+                        newAssets[i].currency = 'USD';
+                        newAssets[i].price = typeof price === 'number' ? price.toFixed(4) : price;
+                        newAssets[i].isLocked = true;
                         continue;
                     }
 
-                    newAssets[i].currency = currency; // Store detected currency
+                    newAssets[i].currency = currency;
 
-                    if (price) {
-                        // Auto-convert to USD
-                        if (currency === 'EUR') {
-                            const converted = price * eurUsd;
-                            log(`CONVERTING ${tick} (EUR): ${price} -> ${converted}`);
-                            price = converted;
-                        } else if (currency === 'GBP') {
-                            price = price * gbpUsd;
-                        } else if (currency === 'GBp') { // Pence
-                            price = (price / 100) * gbpUsd;
-                        }
-
-                        newAssets[i].price = price.toFixed(4); // Store as string for input
+                    // Currency Conversion
+                    if (currency === 'EUR') {
+                        price = price * eurUsd;
+                    } else if (currency === 'GBP') {
+                        price = price * gbpUsd;
+                    } else if (currency === 'GBp') {
+                        price = (price / 100) * gbpUsd;
                     }
+
+                    newAssets[i].price = typeof price === 'number' ? price.toFixed(4) : price;
                 }
             } catch (error) {
-                console.error(`Failed to fetch for ${asset.ticker}`, error);
-                log(`Error fetching ${asset.ticker}: ${error}`);
+                console.error(`Error ${ticker}:`, error);
+                log(`Failed ${ticker}: ${error}`);
             }
         }
 
