@@ -126,16 +126,42 @@ const AllWeatherCalculator: React.FC = () => {
 
                     // Debug IGLN specific field data
                     if (tick.includes('IGLN') || asset.id === 'gold') {
-                        // v1.2.9: Discovery! 'adjclose' contains the TRUE 90.42 price, while 'regularMarketPrice' is 97.91.
-                        const adjCloseData = yahooData.chart?.result?.[0]?.indicators?.adjclose?.[0]?.adjclose;
-                        if (Array.isArray(adjCloseData) && adjCloseData.length > 0) {
-                            // Get the last valid value from the array
-                            const validAdjCloses = adjCloseData.filter((p: any) => typeof p === 'number');
-                            if (validAdjCloses.length > 0) {
-                                const truePrice = validAdjCloses[validAdjCloses.length - 1];
-                                log(`IGLN DATA FOUND: switching from ${price} to ${truePrice} (source: adjclose)`);
-                                price = truePrice;
+                        // CLEAN FIX v2: Robust JSON Traversal (No Math Hacks)
+                        const result = yahooData.chart?.result?.[0];
+                        const indicators = result?.indicators;
+
+                        log(`IGLN DEBUG: Indicators Keys: ${indicators ? Object.keys(indicators).join(',') : 'None'}`);
+
+                        let foundPrice = null;
+                        let source = '';
+
+                        // Priority 1: AdjClose (Proven to be 90.417 in curl)
+                        const adjCloseArr = indicators?.adjclose?.[0]?.adjclose;
+                        if (Array.isArray(adjCloseArr)) {
+                            const valid = adjCloseArr.filter((n: any) => typeof n === 'number');
+                            if (valid.length > 0) {
+                                foundPrice = valid[valid.length - 1]; // Last non-null value
+                                source = 'adjclose';
                             }
+                        }
+
+                        // Priority 2: Quote Close (Standard closing price)
+                        if (!foundPrice) {
+                            const closeArr = indicators?.quote?.[0]?.close;
+                            if (Array.isArray(closeArr)) {
+                                const valid = closeArr.filter((n: any) => typeof n === 'number');
+                                if (valid.length > 0) {
+                                    foundPrice = valid[valid.length - 1];
+                                    source = 'quote.close';
+                                }
+                            }
+                        }
+
+                        if (foundPrice) {
+                            log(`IGLN CLEAN UPDATE: ${price} -> ${foundPrice} (Source: ${source})`);
+                            price = foundPrice;
+                        } else {
+                            log(`IGLN WARNING: Could not find deep price. Using default: ${price}`);
                         }
                     }
 
@@ -143,21 +169,12 @@ const AllWeatherCalculator: React.FC = () => {
 
                     if (tick.includes('IGLN') || asset.id === 'gold') {
                         if (price) {
-                            // Check if AdjClose logic failed (price still inflated > 95)
-                            // v1.3.0 HYBRID FIX: If clean source failed, force math correction.
-                            if (price > 95) {
-                                const anomalyFactor = 1.083;
-                                const original = price;
-                                price = price / anomalyFactor;
-                                log(`IGLN MATH FALLBACK: ${original.toFixed(4)} -> ${price.toFixed(4)} (Factor ${anomalyFactor})`);
-                            }
-
                             newAssets[i].currency = 'USD'; // Force display as USD
                             newAssets[i].price = price.toFixed(4);
                             newAssets[i].isLocked = true; // Visual indicator
                             log(`OVERRIDE APPLIED for ${tick} (ID: ${asset.id}): ${price.toFixed(4)} USD`);
                         }
-                        // Continue to next asset to prevent downstream conversion logic from double-touching
+                        // Continue to next asset
                         continue;
                     }
 
