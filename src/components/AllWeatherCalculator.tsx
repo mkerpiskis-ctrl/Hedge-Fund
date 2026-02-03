@@ -124,25 +124,26 @@ const AllWeatherCalculator: React.FC = () => {
                     // FIXED: Using trim() to catch hidden spaces
                     const tick = asset.ticker.trim();
 
-                    // DEBUG SPECIFICALLY IGLN.L
-                    if (tick.includes('IGLN')) {
-                        log(`DEBUG IGLN: RawPrice=${price}, RawCurr=${currency}, Tick='${tick}'`);
+                    // Debug IGLN specific field data
+                    if (tick.includes('IGLN') || asset.id === 'gold') {
+                        // v1.2.9: Discovery! 'adjclose' contains the TRUE 90.42 price, while 'regularMarketPrice' is 97.91.
+                        const adjCloseData = yahooData.chart?.result?.[0]?.indicators?.adjclose?.[0]?.adjclose;
+                        if (Array.isArray(adjCloseData) && adjCloseData.length > 0) {
+                            // Get the last valid value from the array
+                            const validAdjCloses = adjCloseData.filter((p: any) => typeof p === 'number');
+                            if (validAdjCloses.length > 0) {
+                                const truePrice = validAdjCloses[validAdjCloses.length - 1];
+                                log(`IGLN DATA FOUND: switching from ${price} to ${truePrice} (source: adjclose)`);
+                                price = truePrice;
+                            }
+                        }
                     }
 
                     log(`RAW FETCH ${tick}: Price=${price}, Currency=${currency}`);
 
                     if (tick.includes('IGLN') || asset.id === 'gold') {
                         if (price) {
-                            // Specific Fix for IGLN.L double-conversion anomaly
-                            // v1.2.8: Yahoo appears to be scaling by ~1.083 (old rate?), while live rate is ~1.18.
-                            // We must divide by the fixed Yahoo factor, not the dynamic live rate.
-                            if (price > 95) {
-                                const anomalyFactor = 1.083;
-                                const original = price;
-                                price = price / anomalyFactor;
-                                log(`CORRECTED IGLN ANOMALY: ${original.toFixed(4)} -> ${price.toFixed(4)} (Fixed Factor ${anomalyFactor})`);
-                            }
-
+                            // removed math hack - using true source now
                             newAssets[i].currency = 'USD'; // Force display as USD
                             newAssets[i].price = price.toFixed(4);
                             newAssets[i].isLocked = true; // Visual indicator
