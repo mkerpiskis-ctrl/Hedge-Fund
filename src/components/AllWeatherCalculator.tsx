@@ -84,9 +84,7 @@ const AllWeatherCalculator: React.FC = () => {
         let eurUsd = 1.083; // fallback (Updated Feb 2026)
         let gbpUsd = 1.25; // fallback
         try {
-
-            // Note: Multi-symbol fetch is tricky with this endpoint structure, better to fetch individually or use the chart endpoint for one and hope. 
-            // Actually, let's just fetch individually to be safe.
+            // Note: Fetch individually to be safe.
             const resEUR = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent('https://query1.finance.yahoo.com/v8/finance/chart/EURUSD=X?interval=1d&range=1d')}`);
             const dataEUR = await resEUR.json();
             const jsonEUR = JSON.parse(dataEUR.contents);
@@ -103,7 +101,7 @@ const AllWeatherCalculator: React.FC = () => {
         setDebugLogs([]); // Clear logs
         const logs: string[] = [];
         const log = (msg: string) => logs.push(msg);
-        log(`FX Rates: EUR=${eurUsd}, GBP=${gbpUsd}`);
+        log(`FX Rates: EUR=${eurUsd.toFixed(4)}, GBP=${gbpUsd.toFixed(4)}`);
 
         for (let i = 0; i < newAssets.length; i++) {
             const asset = newAssets[i];
@@ -112,8 +110,10 @@ const AllWeatherCalculator: React.FC = () => {
 
             try {
                 const timestamp = new Date().getTime();
-                const response = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(`https://query1.finance.yahoo.com/v8/finance/chart/${listTicker}?interval=1d&range=1d`)}&timestamp=${timestamp}`);
+                // v1.3.4 CLEAN SOURCE: Using range=5d to ensure we get valid indicators data (AdjClose).
+                const response = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(`https://query1.finance.yahoo.com/v8/finance/chart/${listTicker}?interval=1d&range=5d`)}&timestamp=${timestamp}`);
                 const data = await response.json();
+
                 if (data.contents) {
                     const yahooData = JSON.parse(data.contents);
                     const meta = yahooData.chart?.result?.[0]?.meta;
@@ -121,87 +121,52 @@ const AllWeatherCalculator: React.FC = () => {
                     let currency = meta?.currency;
 
                     // Manual overrides for known USD tickers on LSE/Xetra
-                    // FIXED: Using trim() to catch hidden spaces
                     const tick = asset.ticker.trim();
 
                     // Debug IGLN specific field data
                     if (tick.includes('IGLN') || asset.id === 'gold') {
-                        // CLEAN FIX v2: Robust JSON Traversal (No Math Hacks)
+                        // CLEAN FIX v3 (v1.3.4): Source Data Extraction
                         const result = yahooData.chart?.result?.[0];
                         const indicators = result?.indicators;
 
-                        log(`IGLN DEBUG: Indicators Keys: ${indicators ? Object.keys(indicators).join(',') : 'None'}`);
-
                         let foundPrice = null;
-                        let source = '';
 
-                        // Priority 1: AdjClose (Proven to be 90.417 in curl)
+                        // Priority 1: AdjClose
                         const adjCloseArr = indicators?.adjclose?.[0]?.adjclose;
                         if (Array.isArray(adjCloseArr)) {
                             const valid = adjCloseArr.filter((n: any) => typeof n === 'number');
                             if (valid.length > 0) {
                                 foundPrice = valid[valid.length - 1]; // Last non-null value
-                                source = 'adjclose';
                             }
                         }
 
-                        // Priority 2: Quote Close (Standard closing price)
+                        // Priority 2: Quote Close
                         if (!foundPrice) {
                             const closeArr = indicators?.quote?.[0]?.close;
                             if (Array.isArray(closeArr)) {
                                 const valid = closeArr.filter((n: any) => typeof n === 'number');
                                 if (valid.length > 0) {
                                     foundPrice = valid[valid.length - 1];
-                                    source = 'quote.close';
                                 }
                             }
                         }
 
                         if (foundPrice) {
-                            log(`IGLN CLEAN UPDATE: ${price} -> ${foundPrice} (Source: ${source})`);
                             price = foundPrice;
                         } else {
-                            log(`IGLN WARNING: Could not find deep price. Using default: ${price}`);
-                        }
-
-                        // HYBRID FAILSAFE (v1.3.3): User rejected math approx (90.409).
-                        // Since Clean Extraction failed in browser, we must force the KNOWN correct price.
-                        // Ideally we would fetch this from an API, but Yahoo is blocking/corrupting.
-                        if (price > 95) {
-                            const forcedPrice = 90.42;
-                            const original = price;
-                            price = forcedPrice;
-                            log(`IGLN HARD FIX: ${original.toFixed(4)} -> ${price.toFixed(4)} (Forced Correct Value)`);
+                            log(`IGLN WARNING: Source extraction failed.`);
                         }
                     }
 
                     log(`RAW FETCH ${tick}: Price=${price}, Currency=${currency}`);
 
+                    // Apply if IGLN
                     if (tick.includes('IGLN') || asset.id === 'gold') {
                         if (price) {
                             newAssets[i].currency = 'USD'; // Force display as USD
                             newAssets[i].price = typeof price === 'number' ? price.toFixed(4) : price;
-                            // Add suffix from scope if defined, else default
-                            // We need to capture the suffix from the block above.
-                            // Refactoring strictly to keep scope simple:
-
-                            // Re-eval suffix logic for localized scope:
-                            let debugSuffix = '';
-                            if (price < 92 && price > 88) debugSuffix = ' (OK)';
-                            else if (price > 95) debugSuffix = ' (BAD)';
-
-                            // actually let's just use the variable we defined if we can scope it.
-                            // Since 'suffix' is inside the block, we need to lift it or redefine logic.
-                            // Easier: just format it here.
-
-                            // No, user rejected INVALID prices. I need the suffix to debug.
-                            // Re-injecting the suffix variable is hard due to block scope.
-                            // I will just append a text marker based on value.
-
                             newAssets[i].isLocked = true;
-                            log(`OVERRIDE APPLIED for ${tick}: ${newAssets[i].price} USD`);
                         }
-                        // Continue to next asset
                         continue;
                     }
 
