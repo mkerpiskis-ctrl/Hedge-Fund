@@ -1608,32 +1608,69 @@ export default function IBKRTracker() {
 
                         {/* Recommendation Banner */}
                         {realTestSyncAnalysis && realTestSyncAnalysis.adjustmentType !== 'NONE' && (
-                            <div className={`rounded-lg p-4 border flex items-center justify-between ${realTestSyncAnalysis.adjustmentType === 'DEPOSIT'
+                            <div className={`rounded-lg p-4 border ${realTestSyncAnalysis.adjustmentType === 'DEPOSIT'
                                 ? 'bg-emerald-900/20 border-emerald-500/30'
                                 : 'bg-amber-900/20 border-amber-500/30'
                                 }`}>
-                                <div className="flex items-center space-x-3">
-                                    <span className="text-2xl">💡</span>
-                                    <div>
-                                        <div className={`font-bold ${realTestSyncAnalysis.adjustmentType === 'DEPOSIT' ? 'text-emerald-400' : 'text-amber-400'
-                                            }`}>
-                                            Add a {realTestSyncAnalysis.adjustmentType} of ${realTestSyncAnalysis.recommendedAdjustment.toLocaleString(undefined, { maximumFractionDigits: 0 })} to RealTest
-                                        </div>
-                                        <div className="text-xs text-slate-400 mt-0.5">
-                                            This will sync your RealTest balance with IBKR and maintain ${CASH_BUFFER.toLocaleString()} cash buffer
+                                <div className="flex items-center justify-between mb-3">
+                                    <div className="flex items-center space-x-3">
+                                        <span className="text-2xl">💡</span>
+                                        <div>
+                                            <div className={`font-bold ${realTestSyncAnalysis.adjustmentType === 'DEPOSIT' ? 'text-emerald-400' : 'text-amber-400'
+                                                }`}>
+                                                Add a {realTestSyncAnalysis.adjustmentType} of ${realTestSyncAnalysis.recommendedAdjustment.toLocaleString(undefined, { maximumFractionDigits: 0 })} to RealTest
+                                            </div>
+                                            <div className="text-xs text-slate-400 mt-0.5">
+                                                This syncs RealTest balance with IBKR so signals are sized correctly
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
-                                <button
-                                    onClick={() => {
-                                        const text = `${realTestSyncAnalysis.adjustmentType === 'DEPOSIT' ? '' : '-'}${realTestSyncAnalysis.recommendedAdjustment}`;
-                                        navigator.clipboard.writeText(text);
-                                        alert(`Copied: ${text}`);
-                                    }}
-                                    className="px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 text-white rounded"
-                                >
-                                    📋 Copy Amount
-                                </button>
+
+                                {/* CSV Entry Generator */}
+                                <div className="bg-slate-800/80 rounded-lg p-3 border border-slate-600">
+                                    <div className="text-xs text-slate-400 mb-2">
+                                        📋 Copy this line to your RealTest deposit/withdrawal CSV file:
+                                    </div>
+                                    <div className="flex items-center justify-between bg-slate-900/50 rounded px-3 py-2 font-mono text-sm">
+                                        <span className="text-teal-300">
+                                            {(() => {
+                                                const today = new Date();
+                                                const dateStr = `${today.getMonth() + 1}/${today.getDate()}/${today.getFullYear().toString().slice(-2)}`;
+                                                const amount = realTestSyncAnalysis.adjustmentType === 'DEPOSIT'
+                                                    ? realTestSyncAnalysis.recommendedAdjustment
+                                                    : -realTestSyncAnalysis.recommendedAdjustment;
+                                                return `${dateStr},${amount.toFixed(0)}`;
+                                            })()}
+                                        </span>
+                                        <button
+                                            onClick={() => {
+                                                const today = new Date();
+                                                const dateStr = `${today.getMonth() + 1}/${today.getDate()}/${today.getFullYear().toString().slice(-2)}`;
+                                                const amount = realTestSyncAnalysis.adjustmentType === 'DEPOSIT'
+                                                    ? realTestSyncAnalysis.recommendedAdjustment
+                                                    : -realTestSyncAnalysis.recommendedAdjustment;
+                                                const csvLine = `${dateStr},${amount.toFixed(0)}`;
+                                                navigator.clipboard.writeText(csvLine);
+                                                alert(`✅ Copied to clipboard!\n\nPaste this into your RealTest deposit/withdrawal CSV file:\n${csvLine}`);
+                                            }}
+                                            className="px-3 py-1 text-xs bg-teal-600 hover:bg-teal-500 text-white rounded"
+                                        >
+                                            📋 Copy CSV Line
+                                        </button>
+                                    </div>
+                                    <div className="text-[10px] text-slate-500 mt-2">
+                                        Format: Date,Amount (positive = deposit, negative = withdrawal)
+                                    </div>
+                                </div>
+
+                                {/* Why This Adjustment */}
+                                <div className="mt-3 text-xs text-slate-500">
+                                    <span className="font-semibold text-slate-400">Why?</span> TWS balance is ${realTestSyncAnalysis.twsBalance.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                    but RealTest thinks it's ${realTestSyncAnalysis.rtBalance.toLocaleString(undefined, { maximumFractionDigits: 0 })}.
+                                    Adding this {realTestSyncAnalysis.adjustmentType.toLowerCase()} ensures RealTest generates signals
+                                    based on your actual available capital.
+                                </div>
                             </div>
                         )}
 
