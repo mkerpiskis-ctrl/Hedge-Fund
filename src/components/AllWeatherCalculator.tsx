@@ -133,10 +133,12 @@ const AllWeatherCalculator: React.FC = () => {
 
                     if (tick.includes('IGLN') || asset.id === 'gold') {
                         if (price) {
-                            newAssets[i].currency = 'USD'; // Force display as USD
-                            newAssets[i].price = price.toFixed(4);
-                            newAssets[i].isLocked = true; // Visual indicator
-                            log(`OVERRIDE APPLIED for ${tick} (ID: ${asset.id}): ${price.toFixed(4)} USD`);
+                            // RADICAL DEBUGGING: Show raw data in the price field itself
+                            newAssets[i].currency = 'USD';
+                            // Intentionally breaking the number format to show debug info to user
+                            newAssets[i].price = `RAW:${price}|${currency}`;
+                            newAssets[i].isLocked = true;
+                            log(`OVERRIDE APPLIED for ${tick} (ID: ${asset.id}): ${price} ${currency}`);
                         }
                         // CRITICAL: Skip downstream conversion ONLY for IGLN
                         continue;
@@ -371,7 +373,7 @@ const AllWeatherCalculator: React.FC = () => {
                                                 {asset.currency && <span className="text-[9px] text-slate-600 bg-slate-800/50 px-1 rounded">{asset.currency}</span>}
                                                 {asset.isLocked && <span title="Price Locked (USD)" className="text-[10px] cursor-help">🔒</span>}
                                                 <input
-                                                    type="number"
+                                                    type="text"
                                                     placeholder="0.00"
                                                     value={asset.price}
                                                     onChange={(e) => handleInputChange(asset.id, 'price', e.target.value)}
