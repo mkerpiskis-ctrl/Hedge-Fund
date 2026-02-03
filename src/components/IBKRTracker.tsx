@@ -571,7 +571,8 @@ export default function IBKRTracker() {
                 isOpen: cols[12]?.trim().toLowerCase() === 'end of test'
             };
 
-            if (trade.symbol && trade.qtyIn > 0) {
+            // Skip BUYandHope strategy - it's just a benchmark (SPY), not actual portfolio
+            if (trade.symbol && trade.qtyIn > 0 && trade.strategy !== 'BUYandHope') {
                 trades.push(trade);
             }
         }
@@ -1590,8 +1591,8 @@ export default function IBKRTracker() {
                                 </div>
                             </div>
                             <div className={`rounded-lg p-4 border ${(realTestSyncAnalysis?.drift || 0) >= 0
-                                    ? 'bg-emerald-900/30 border-emerald-500/30'
-                                    : 'bg-rose-900/30 border-rose-500/30'
+                                ? 'bg-emerald-900/30 border-emerald-500/30'
+                                : 'bg-rose-900/30 border-rose-500/30'
                                 }`}>
                                 <div className="text-xs text-slate-500 uppercase mb-1">Drift (TWS - RT)</div>
                                 <div className={`text-2xl font-bold ${(realTestSyncAnalysis?.drift || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'
@@ -1608,8 +1609,8 @@ export default function IBKRTracker() {
                         {/* Recommendation Banner */}
                         {realTestSyncAnalysis && realTestSyncAnalysis.adjustmentType !== 'NONE' && (
                             <div className={`rounded-lg p-4 border flex items-center justify-between ${realTestSyncAnalysis.adjustmentType === 'DEPOSIT'
-                                    ? 'bg-emerald-900/20 border-emerald-500/30'
-                                    : 'bg-amber-900/20 border-amber-500/30'
+                                ? 'bg-emerald-900/20 border-emerald-500/30'
+                                : 'bg-amber-900/20 border-amber-500/30'
                                 }`}>
                                 <div className="flex items-center space-x-3">
                                     <span className="text-2xl">💡</span>
