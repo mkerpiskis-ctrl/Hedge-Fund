@@ -77,7 +77,7 @@ const AllWeatherCalculator: React.FC = () => {
     const [isRefreshing, setIsRefreshing] = useState(false);
 
     // Cache configuration
-    const CACHE_PREFIX = 'aw_price_cache_v1_';
+    const CACHE_PREFIX = 'aw_price_cache_v2_';
     const CACHE_DURATION = 10 * 60 * 1000; // 10 minutes
 
     const getCachedPrice = (ticker: string): { price: number, currency: string, source: string, timestamp: number } | null => {
@@ -108,8 +108,8 @@ const AllWeatherCalculator: React.FC = () => {
         }
 
         // Fetch Live
-        // v1.3.5: Using /raw endpoint + range=2d to reduce load and avoid "Failed to fetch"
-        const targetUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=2d`;
+        // v1.3.6: Returned to range=5d (proven data) but keeping Caching (proven stability)
+        const targetUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=5d`;
         const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
 
         const res = await fetch(proxyUrl);
