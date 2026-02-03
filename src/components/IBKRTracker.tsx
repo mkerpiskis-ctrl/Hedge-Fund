@@ -154,6 +154,9 @@ export default function IBKRTracker() {
                     setTwsTotals(accountData._totals);
                     delete accountData._totals;
                 }
+                // User requested to hide this account
+                delete accountData['U20791125'];
+
                 setTwsAccounts(accountData);
             }
 
@@ -442,11 +445,11 @@ export default function IBKRTracker() {
             if (data.systems.has('RUI')) targetValue += ruiTargetPerPos;
 
             const price = data.price || 1; // Avoid division by zero
-            // Fractional shares support: Round to 4 decimals
-            const targetQty = Number((targetValue / price).toFixed(4));
+            // Fractional shares support: Round to 2 decimals (User request)
+            const targetQty = Number((targetValue / price).toFixed(2));
 
             // 3. Get current position for THIS account only
-            const currentPos = displayedTwsPositions.find(p => p.symbol === symbol);
+            const currentPos = displayedTwsPositions.filter(p => p.account === selectedAccount).find(p => p.symbol === symbol);
             const currentQty = currentPos ? currentPos.position : 0;
 
             // 4. Calculate Delta
