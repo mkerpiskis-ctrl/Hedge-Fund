@@ -118,10 +118,10 @@ const AllWeatherCalculator: React.FC = () => {
         let yahooData;
 
         if (ticker.includes('IGLN') || ticker === 'IGLN.L') {
-            // Use our own proxy with INTRADAY data to get current price
-            // range=5d was missing today's session; interval=1m&range=1d gives us current price
-            const apiUrl = `/api/yahoo?symbol=${encodeURIComponent(ticker)}&range=1d&interval=1m&_=${Date.now()}`;
-            console.log(`[IGLN v1.6.0] Calling intraday API: ${apiUrl}`);
+            // Use our own proxy with enhanced browser headers
+            // v1.8.0: Using daily data (5d) with improved headers for better Yahoo response
+            const apiUrl = `/api/yahoo?symbol=${encodeURIComponent(ticker)}&range=5d&interval=1d&_=${Date.now()}`;
+            console.log(`[IGLN v1.8.0] Calling API with enhanced headers: ${apiUrl}`);
             const res = await fetch(apiUrl);
             if (!res.ok) throw new Error(`API returned ${res.status}`);
             yahooData = await res.json();
@@ -173,16 +173,8 @@ const AllWeatherCalculator: React.FC = () => {
 
             if (foundPrice) {
                 price = foundPrice;
-            } else if (price && price > 95) {
-                // Fallback: If dynamic extraction failed (empty intraday, cached daily),
-                // and regularMarketPrice is in the "EUR range" (>95), apply correction factor.
-                // Yahoo's regularMarketPrice for IGLN.L is consistently ~1.083x the true USD price.
-                // 97.913 / 1.083 ≈ 90.42 (matches Yahoo Finance webpage)
-                const correctionFactor = 1.083;
-                const correctedPrice = price / correctionFactor;
-                console.log(`[IGLN v1.7.0] Applying correction: ${price} / ${correctionFactor} = ${correctedPrice}`);
-                price = correctedPrice;
             }
+            // No fallback correction - we want pure source data
         }
 
         const data = { price, currency, source: 'yahoo' };
