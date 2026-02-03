@@ -683,6 +683,97 @@ export default function IBKRTracker() {
         reader.readAsText(file);
     };
 
+    // Parse IBKR Flex Query CSV for Trade History
+    const parseFlexQueryCSV = (csvContent: string): Trade[] => {
+        const lines = csvContent.split('\n').filter(line => line.trim());
+        if (lines.length < 2) return [];
+
+        const trades: Trade[] = [];
+
+        // Skip header row (index 0)
+        for (let i = 1; i < lines.length; i++) {
+            // Parse CSV with quotes
+            const cols = lines[i].match(/("([^"]*)"|[^,]*)/g)?.map(c => c.replace(/^"|"$/g, '').trim()) || [];
+            if (cols.length < 8) continue;
+
+            const account = cols[0] || '';
+            const symbol = cols[1] || '';
+            const tradeDateRaw = cols[2] || '';
+            const buySell = cols[3] || '';
+            const quantity = parseFloat(cols[4]) || 0;
+            const price = parseFloat(cols[5]) || 0;
+
+            // Skip MULTI (aggregate) rows and forex pairs
+            if (tradeDateRaw === 'MULTI') continue;
+            if (symbol.includes('.')) continue; // Skip EUR.USD, GBP.USD etc.
+
+            // Parse date from YYYYMMDD format
+            let tradeDate = '';
+            if (tradeDateRaw.length === 8) {
+                const year = tradeDateRaw.substring(0, 4);
+                const month = tradeDateRaw.substring(4, 6);
+                const day = tradeDateRaw.substring(6, 8);
+                tradeDate = `${year}-${month}-${day}`;
+            }
+
+            // Determine action
+            const action: 'BUY' | 'SELL' = buySell.toUpperCase() === 'BUY' ? 'BUY' : 'SELL';
+
+            // Determine system based on account
+            const system: 'NDX' | 'RUI' | 'PF' = account === 'U15971587' ? 'PF' :
+                account === 'U15771225' ? 'NDX' : 'RUI';
+
+            const trade: Trade = {
+                id: `flex_${account}_${symbol}_${tradeDateRaw}_${i}`,
+                date: tradeDate,
+                system: system,
+                symbol: symbol,
+                action: action,
+                quantity: Math.abs(quantity),
+                price: price,
+                totalValue: Math.abs(quantity) * price,
+                importedAt: new Date().toISOString(),
+                account: account
+            };
+
+            if (trade.symbol && trade.quantity > 0 && trade.date) {
+                trades.push(trade);
+            }
+        }
+
+        return trades;
+    };
+
+    // Handle Flex Query CSV Upload
+    const handleFlexQueryUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            const content = event.target?.result as string;
+            const flexTrades = parseFlexQueryCSV(content);
+
+            if (flexTrades.length === 0) {
+                setError('No valid trades found in Flex Query CSV. Make sure it contains trade data.');
+                return;
+            }
+
+            // Merge with existing trades, avoiding duplicates by ID
+            const existingIds = new Set(trades.map(t => t.id));
+            const newTrades = flexTrades.filter(t => !existingIds.has(t.id));
+
+            if (newTrades.length === 0) {
+                alert('All trades from this Flex Query are already imported.');
+                return;
+            }
+
+            setTrades(prev => [...prev, ...newTrades]);
+            alert(`✅ Imported ${newTrades.length} trades from Flex Query!\n\nTotal trades: ${trades.length + newTrades.length}`);
+        };
+        reader.readAsText(file);
+    };
+
     // Smart Rebalancing Calculation
     const calculateSmartRebalance = (csvTrades: Trade[]) => {
         if (!displayedTotals || selectedAccount === 'ALL') {
@@ -1440,6 +1531,15 @@ export default function IBKRTracker() {
                         <h4 className="text-slate-300 font-semibold">Trade History (Live & Manual)</h4>
                         <div className="flex items-center space-x-3">
                             <span className="text-xs text-slate-500">{finalTrades.length} trades</span>
+                            <label className="px-2 py-1 text-[10px] bg-blue-600/20 text-blue-400 rounded hover:bg-blue-600/30 border border-blue-600/30 cursor-pointer">
+                                📥 Import Flex Query
+                                <input
+                                    type="file"
+                                    accept=".csv"
+                                    className="hidden"
+                                    onChange={handleFlexQueryUpload}
+                                />
+                            </label>
                             {!twsConnected && (
                                 <button
                                     onClick={clearAllData}
