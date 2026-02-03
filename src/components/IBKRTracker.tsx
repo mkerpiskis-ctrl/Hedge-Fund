@@ -177,6 +177,24 @@ export default function IBKRTracker() {
         }
     }, []);
 
+    // Manual Refresh Trigger
+    const handleTwsRefresh = useCallback(async () => {
+        setIsLoading(true);
+        try {
+            // Trigger TWS upate
+            const res = await fetch(`${TWS_BRIDGE_URL}/api/refresh`, { method: 'POST' });
+            if (res.ok) {
+                // Wait for TWS to process updates
+                await new Promise(resolve => setTimeout(resolve, 1500));
+                await fetchTwsData();
+            }
+        } catch (e) {
+            console.error('Refresh failed:', e);
+        } finally {
+            setIsLoading(false);
+        }
+    }, [fetchTwsData]);
+
     // Derived totals based on selection
     const displayedTotals = selectedAccount === 'ALL'
         ? twsTotals
@@ -648,10 +666,11 @@ export default function IBKRTracker() {
                         </select>
 
                         <button
-                            onClick={fetchTwsData}
-                            className="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded transition-all flex items-center gap-1"
+                            onClick={handleTwsRefresh}
+                            disabled={isLoading}
+                            className={`px-3 py-1 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded transition-all flex items-center gap-1 ${isLoading ? 'opacity-50 cursor-wait' : ''}`}
                         >
-                            🔄 Refresh
+                            {isLoading ? '⏳...' : '🔄 Refresh'}
                         </button>
                     </div>
                 </div>
@@ -752,11 +771,15 @@ export default function IBKRTracker() {
                     </div>
                 </div>
                 <button
-                    onClick={fetchLivePrices}
-                    disabled={isLoading || positions.length === 0}
-                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-white text-xs font-bold rounded-lg transition-all"
+                    onClick={async () => {
+                        await handleTwsRefresh();
+                        await fetchLivePrices();
+                    }}
+                    disabled={isLoading || (positions.length === 0 && !twsConnected)}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-white text-xs font-bold rounded-lg transition-all flex items-center gap-2"
                 >
-                    {isLoading ? 'UPDATING...' : '🔄 REFRESH PRICES'}
+                    {isLoading ? <span className="animate-spin">⏳</span> : '🔄'}
+                    {twsConnected ? 'REFRESH ALL' : 'REFRESH PRICES'}
                 </button>
             </div>
 
