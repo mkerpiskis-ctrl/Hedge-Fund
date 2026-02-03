@@ -23,6 +23,7 @@ interface Position {
     marketValue: number | null;
     pnl: number | null;
     pnlPercent: number | null;
+    account?: string; // Track which account this position belongs to
 }
 
 // TWS Bridge Types
@@ -155,8 +156,9 @@ export default function IBKRTracker() {
                     setTwsTotals(accountData._totals);
                     delete accountData._totals;
                 }
-                // User requested to hide this account
+                // User requested to hide these accounts
                 delete accountData['U20791125'];
+                delete accountData['U15799319'];
 
                 setTwsAccounts(accountData);
             }
@@ -405,8 +407,8 @@ export default function IBKRTracker() {
                 }
             }
 
-            // Determine system from BasketTag
-            const system = detectSystem(basketTag);
+            // Determine system from BasketTag or Filename
+            const system = detectSystem(basketTag, filename);
 
             const trade: Trade = {
                 id: `${Date.now()}_${i}`,
@@ -429,13 +431,21 @@ export default function IBKRTracker() {
         return trades;
     };
 
-    // Detect system from BasketTag
-    const detectSystem = (basketTag: string): 'NDX' | 'RUI' => {
+    // Detect system from BasketTag OR Filename
+    const detectSystem = (basketTag: string, filename?: string): 'NDX' | 'RUI' => {
         const tag = basketTag.toUpperCase();
-        if (tag.includes('NDX') || tag.includes('NASDAQ')) {
-            return 'NDX';
+        // Check BasketTag first
+        if (tag.includes('NDX') || tag.includes('NASDAQ')) return 'NDX';
+        if (tag.includes('RUI') || tag.includes('RUSSELL')) return 'RUI';
+
+        // Fallback to Filename
+        if (filename) {
+            const fname = filename.toUpperCase();
+            if (fname.includes('NDX')) return 'NDX';
+            if (fname.includes('RUI')) return 'RUI';
         }
-        // R1000, RUI, Russell, etc. -> RUI
+
+        // Default
         return 'RUI';
     };
 
@@ -639,13 +649,13 @@ export default function IBKRTracker() {
         }
     };
 
-    // Calculate positions from all trades - CONSOLIDATE same symbols across systems
+    // Calculate positions from all trades - SEPARATE by Symbol + Account
     const calculatePositions = (allTrades: Trade[]): Position[] => {
         const posMap = new Map<string, Position>();
 
         for (const trade of allTrades) {
-            // Use only symbol as key to consolidate across systems
-            const key = trade.symbol;
+            // Use Symbol + Account as key to separate positions
+            const key = `${trade.symbol}_${trade.account || 'UNKNOWN'}`;
             const existing = posMap.get(key);
 
             if (trade.action === 'BUY') {
@@ -667,7 +677,8 @@ export default function IBKRTracker() {
                         currentPrice: null,
                         marketValue: null,
                         pnl: null,
-                        pnlPercent: null
+                        pnlPercent: null,
+                        account: trade.account
                     });
                 }
             } else {
@@ -686,15 +697,16 @@ export default function IBKRTracker() {
 
 
 
-    const filteredPositions = systemFilter === 'ALL'
-        ? positions
-        : positions.filter(p => p.systems.includes(systemFilter));
+    const filteredPositions = positions.filter(p =>
+        (systemFilter === 'ALL' || p.systems.includes(systemFilter)) &&
+        (selectedAccount === 'ALL' || p.account === selectedAccount || !p.account)
+    );
 
     // MERGE LOGIC: Combine TWS Live Data with Manual System Tags
     const finalPositions = (twsConnected && selectedAccount !== 'ALL')
         ? displayedTwsPositions.map(twsPos => {
-            // Find matching manual position to get System tags (NDX/RUI)
-            const manualMatch = positions.find(p => p.symbol === twsPos.symbol);
+            // Find matching manual position to get System tags (NDX/RUI) - Match by Symbol AND Account
+            const manualMatch = positions.find(p => p.symbol === twsPos.symbol && (p.account === twsPos.account || !p.account));
             const systems = manualMatch ? manualMatch.systems : ['TWS']; // Default to TWS if unknown
 
             // Reuse price from manual fetch if available, OR use latest fetched price for TWS symbol
