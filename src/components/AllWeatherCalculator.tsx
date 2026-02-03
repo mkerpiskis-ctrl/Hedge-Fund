@@ -114,7 +114,11 @@ const AllWeatherCalculator: React.FC = () => {
 
                     // Manual overrides for known USD tickers on LSE/Xetra
                     if (['IGLN.L', 'CNDX.L', 'DTLA.L', 'WEXU.DE'].includes(asset.ticker)) {
-                        currency = 'USD';
+                        if (price) {
+                            newAssets[i].currency = 'USD';
+                            newAssets[i].price = price.toFixed(4);
+                        }
+                        continue;
                     }
 
                     newAssets[i].currency = currency; // Store detected currency
