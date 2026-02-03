@@ -746,22 +746,33 @@ export default function IBKRTracker() {
 
     // Handle Flex Query CSV Upload
     const handleFlexQueryUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        console.log('handleFlexQueryUpload called');
         const file = e.target.files?.[0];
-        if (!file) return;
+        if (!file) {
+            console.log('No file selected');
+            return;
+        }
+        console.log('File selected:', file.name, 'Size:', file.size);
 
         const reader = new FileReader();
         reader.onload = (event) => {
             const content = event.target?.result as string;
+            console.log('File content loaded, length:', content.length);
+            console.log('First 300 chars:', content.substring(0, 300));
+
             const flexTrades = parseFlexQueryCSV(content);
+            console.log('Parsed trades count:', flexTrades.length);
+            console.log('Sample trades:', flexTrades.slice(0, 3));
 
             if (flexTrades.length === 0) {
-                setError('No valid trades found in Flex Query CSV. Make sure it contains trade data.');
+                alert('No valid trades found in Flex Query CSV.\n\nCheck browser console (F12) for details.');
                 return;
             }
 
             // Merge with existing trades, avoiding duplicates by ID
             const existingIds = new Set(trades.map(t => t.id));
             const newTrades = flexTrades.filter(t => !existingIds.has(t.id));
+            console.log('New trades (not duplicates):', newTrades.length);
 
             if (newTrades.length === 0) {
                 alert('All trades from this Flex Query are already imported.');
@@ -771,7 +782,14 @@ export default function IBKRTracker() {
             setTrades(prev => [...prev, ...newTrades]);
             alert(`✅ Imported ${newTrades.length} trades from Flex Query!\n\nTotal trades: ${trades.length + newTrades.length}`);
         };
+        reader.onerror = (err) => {
+            console.error('FileReader error:', err);
+            alert('Error reading file');
+        };
         reader.readAsText(file);
+
+        // Reset input so same file can be selected again
+        e.target.value = '';
     };
 
     // Smart Rebalancing Calculation
@@ -1524,32 +1542,39 @@ export default function IBKRTracker() {
                 </div>
             )}
 
-            {/* Trade History */}
-            {finalTrades.length > 0 && (
-                <div className="bg-slate-800/30 rounded-lg p-4 border border-slate-700">
-                    <div className="flex items-center justify-between mb-3">
-                        <h4 className="text-slate-300 font-semibold">Trade History (Live & Manual)</h4>
-                        <div className="flex items-center space-x-3">
-                            <span className="text-xs text-slate-500">{finalTrades.length} trades</span>
-                            <label className="px-2 py-1 text-[10px] bg-blue-600/20 text-blue-400 rounded hover:bg-blue-600/30 border border-blue-600/30 cursor-pointer">
-                                📥 Import Flex Query
-                                <input
-                                    type="file"
-                                    accept=".csv"
-                                    className="hidden"
-                                    onChange={handleFlexQueryUpload}
-                                />
-                            </label>
-                            {!twsConnected && (
-                                <button
-                                    onClick={clearAllData}
-                                    className="px-2 py-1 text-[10px] bg-rose-600/20 text-rose-400 rounded hover:bg-rose-600/30 border border-rose-600/30"
-                                >
-                                    Clear All
-                                </button>
-                            )}
-                        </div>
+            {/* Trade History - Always visible for Import */}
+            <div className="bg-slate-800/30 rounded-lg p-4 border border-slate-700">
+                <div className="flex items-center justify-between mb-3">
+                    <h4 className="text-slate-300 font-semibold">Trade History (Live & Manual)</h4>
+                    <div className="flex items-center space-x-3">
+                        <span className="text-xs text-slate-500">{finalTrades.length} trades</span>
+                        <label className="px-2 py-1 text-[10px] bg-blue-600/20 text-blue-400 rounded hover:bg-blue-600/30 border border-blue-600/30 cursor-pointer">
+                            📥 Import Flex Query
+                            <input
+                                type="file"
+                                accept=".csv"
+                                className="hidden"
+                                onChange={handleFlexQueryUpload}
+                            />
+                        </label>
+                        {!twsConnected && trades.length > 0 && (
+                            <button
+                                onClick={clearAllData}
+                                className="px-2 py-1 text-[10px] bg-rose-600/20 text-rose-400 rounded hover:bg-rose-600/30 border border-rose-600/30"
+                            >
+                                Clear All
+                            </button>
+                        )}
                     </div>
+                </div>
+
+                {finalTrades.length === 0 ? (
+                    <div className="text-center py-8 text-slate-500">
+                        <div className="text-2xl mb-2">📋</div>
+                        <p className="text-sm">No trades recorded yet</p>
+                        <p className="text-xs mt-1">Import from IBKR Flex Query or add trades manually</p>
+                    </div>
+                ) : (
                     <div className="overflow-x-auto">
                         <table className="w-full text-xs">
                             <thead className="text-slate-500 uppercase sticky top-0 bg-slate-800">
@@ -1635,8 +1660,8 @@ export default function IBKRTracker() {
                             </tbody>
                         </table>
                     </div>
-                </div>
-            )}
+                )}
+            </div>
 
             {/* RealTest Sync Tool */}
             <div className="bg-gradient-to-r from-teal-900/30 to-cyan-900/30 rounded-xl p-4 border border-teal-500/30">
