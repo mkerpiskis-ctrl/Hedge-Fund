@@ -120,9 +120,11 @@ const AllWeatherCalculator: React.FC = () => {
         if (ticker.includes('IGLN') || ticker === 'IGLN.L') {
             // Use our own proxy to bypass third-party cache
             const apiUrl = `/api/yahoo?symbol=${encodeURIComponent(ticker)}&range=5d&_=${Date.now()}`;
+            console.log(`[IGLN v1.5.1] Calling custom API: ${apiUrl}`);
             const res = await fetch(apiUrl);
             if (!res.ok) throw new Error(`API returned ${res.status}`);
             yahooData = await res.json();
+            console.log(`[IGLN v1.5.1] API Response received, adjclose count:`, yahooData.chart?.result?.[0]?.indicators?.adjclose?.[0]?.adjclose?.length);
         } else {
             // Use allorigins for other tickers (works fine for them)
             const timestamp = Date.now();
