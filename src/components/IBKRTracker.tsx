@@ -1695,11 +1695,11 @@ export default function IBKRTracker() {
                                                 <td className="py-2 font-mono font-bold">{p.symbol}</td>
                                                 <td className="py-2 text-right">{p.rtQty}</td>
                                                 <td className="py-2 text-right">${p.rtCost.toFixed(2)}</td>
-                                                <td className="py-2 text-right">{p.twsQty}</td>
+                                                <td className="py-2 text-right">{Math.round(p.twsQty * 100) / 100}</td>
                                                 <td className="py-2 text-right">${p.twsCost.toFixed(2)}</td>
-                                                <td className={`py-2 text-right font-bold ${p.qtyDelta === 0 ? 'text-slate-500' : p.qtyDelta > 0 ? 'text-emerald-400' : 'text-rose-400'
+                                                <td className={`py-2 text-right font-bold ${Math.round(p.qtyDelta) === 0 ? 'text-slate-500' : p.qtyDelta > 0 ? 'text-emerald-400' : 'text-rose-400'
                                                     }`}>
-                                                    {p.qtyDelta === 0 ? '-' : (p.qtyDelta > 0 ? '+' : '') + p.qtyDelta}
+                                                    {Math.round(p.qtyDelta) === 0 ? '-' : (p.qtyDelta > 0 ? '+' : '') + Math.round(p.qtyDelta)}
                                                 </td>
                                                 <td className={`py-2 text-right font-bold ${Math.abs(p.valueDelta) < 10 ? 'text-slate-500' : p.valueDelta > 0 ? 'text-emerald-400' : 'text-rose-400'
                                                     }`}>
@@ -1711,6 +1711,16 @@ export default function IBKRTracker() {
                                 </table>
                             </div>
                         )}
+
+                        {/* Timing Warning */}
+                        <div className="bg-amber-900/20 border border-amber-500/30 rounded-lg p-3 text-xs">
+                            <span className="text-amber-400 font-semibold">⚠️ Timing Note:</span>
+                            <span className="text-slate-400 ml-1">
+                                RealTest CSV is EOD data. If you've already executed today's signals in TWS,
+                                positions will mismatch until RealTest generates a new trade list.
+                                Upload CSV <strong>before</strong> executing signals for accurate sync.
+                            </span>
+                        </div>
 
                         {/* Trade Summary */}
                         <div className="text-xs text-slate-500 text-center">
