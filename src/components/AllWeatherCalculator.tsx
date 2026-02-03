@@ -113,15 +113,19 @@ const AllWeatherCalculator: React.FC = () => {
         }
 
         // Fetch Live
-        // v1.4.0: Using range=1mo to ensure we ALWAYS get the latest trading day's data
-        // (range=5d was inconsistent on weekends/holidays)
-        const targetUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1mo`;
-        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
+        // v1.4.1: Using /get endpoint with cache-busting timestamp to force fresh data
+        // The proxy was caching stale 4-day data, missing the latest 90.42 value
+        const timestamp = Date.now();
+        const targetUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=5d`;
+        const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}&_=${timestamp}`;
 
         const res = await fetch(proxyUrl);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-        const yahooData = await res.json();
+        const wrapper = await res.json();
+        if (!wrapper.contents) throw new Error('No contents in proxy response');
+
+        const yahooData = JSON.parse(wrapper.contents);
         const result = yahooData.chart?.result?.[0];
         const meta = result?.meta;
 
