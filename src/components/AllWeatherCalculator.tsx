@@ -131,12 +131,12 @@ const AllWeatherCalculator: React.FC = () => {
 
                     log(`RAW FETCH ${tick}: Price=${price}, Currency=${currency}`);
 
-                    if (tick.includes('IGLN')) {
+                    if (tick.includes('IGLN') || asset.id === 'gold') {
                         if (price) {
                             newAssets[i].currency = 'USD'; // Force display as USD
                             newAssets[i].price = price.toFixed(4);
                             newAssets[i].isLocked = true; // Visual indicator
-                            log(`OVERRIDE APPLIED for ${tick}: ${price.toFixed(4)} USD`);
+                            log(`OVERRIDE APPLIED for ${tick} (ID: ${asset.id}): ${price.toFixed(4)} USD`);
                         }
                         // CRITICAL: Skip downstream conversion ONLY for IGLN
                         continue;
