@@ -442,7 +442,8 @@ export default function IBKRTracker() {
             if (data.systems.has('RUI')) targetValue += ruiTargetPerPos;
 
             const price = data.price || 1; // Avoid division by zero
-            const targetQty = Math.floor(targetValue / price);
+            // Fractional shares support: Round to 4 decimals
+            const targetQty = Number((targetValue / price).toFixed(4));
 
             // 3. Get current position for THIS account only
             const currentPos = displayedTwsPositions.find(p => p.symbol === symbol);
