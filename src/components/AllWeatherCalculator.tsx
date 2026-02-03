@@ -9,6 +9,7 @@ interface Asset {
     averagePrice: number | string;
     units: number | string;
     currency?: string;
+    isLocked?: boolean;
 }
 
 interface ResultRow {
@@ -128,10 +129,11 @@ const AllWeatherCalculator: React.FC = () => {
                         log(`DEBUG IGLN: RawPrice=${price}, RawCurr=${currency}, Tick='${tick}'`);
                     }
 
-                    if (['IGLN.L', 'CNDX.L', 'DTLA.L', 'WEXU.DE'].includes(tick)) {
+                    if (tick.includes('IGLN') || tick.includes('CNDX') || tick.includes('DTLA') || tick.includes('WEXU')) {
                         if (price) {
                             newAssets[i].currency = 'USD'; // Force display as USD
                             newAssets[i].price = price.toFixed(4);
+                            newAssets[i].isLocked = true; // Visual indicator
                             log(`OVERRIDE APPLIED for ${tick}: ${price.toFixed(4)} USD`);
                         }
                         // CRITICAL: Skip downstream conversion
@@ -365,6 +367,7 @@ const AllWeatherCalculator: React.FC = () => {
                                         <td className="p-2 text-right">
                                             <div className="flex justify-end items-center space-x-2">
                                                 {asset.currency && <span className="text-[9px] text-slate-600 bg-slate-800/50 px-1 rounded">{asset.currency}</span>}
+                                                {asset.isLocked && <span title="Price Locked (USD)" className="text-[10px] cursor-help">🔒</span>}
                                                 <input
                                                     type="number"
                                                     placeholder="0.00"
