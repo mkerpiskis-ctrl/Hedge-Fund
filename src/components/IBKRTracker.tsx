@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 interface Trade {
     id: string;
     date: string;
-    system: 'NDX' | 'RUI';
+    system: 'NDX' | 'RUI' | 'PF';
     symbol: string;
     action: 'BUY' | 'SELL';
     quantity: number;
@@ -407,8 +407,9 @@ export default function IBKRTracker() {
                 }
             }
 
-            // Determine system from BasketTag or Filename
-            const system = detectSystem(basketTag, filename);
+            // Determine system from BasketTag or Filename or Account
+            // Note: We use the just-extracted account variable
+            const system = detectSystem(basketTag, filename, account);
 
             const trade: Trade = {
                 id: `${Date.now()}_${i}`,
@@ -431,14 +432,17 @@ export default function IBKRTracker() {
         return trades;
     };
 
-    // Detect system from BasketTag OR Filename
-    const detectSystem = (basketTag: string, filename?: string): 'NDX' | 'RUI' => {
+    // Detect system from BasketTag OR Filename OR Account
+    const detectSystem = (basketTag: string, filename?: string, account?: string): 'NDX' | 'RUI' | 'PF' => {
+        // 1. Check Account Special Cases
+        if (account === 'U15971587') return 'PF';
+
         const tag = basketTag.toUpperCase();
-        // Check BasketTag first
+        // 2. Check BasketTag
         if (tag.includes('NDX') || tag.includes('NASDAQ')) return 'NDX';
         if (tag.includes('RUI') || tag.includes('RUSSELL')) return 'RUI';
 
-        // Fallback to Filename
+        // 3. Fallback to Filename
         if (filename) {
             const fname = filename.toUpperCase();
             if (fname.includes('NDX')) return 'NDX';
@@ -453,6 +457,12 @@ export default function IBKRTracker() {
     const calculateSmartRebalance = (csvTrades: Trade[]) => {
         if (!displayedTotals || selectedAccount === 'ALL') {
             alert('Please select a specific account (e.g., U15771225) to use Smart Rebalancing.');
+            return null;
+        }
+
+        // Safety: If Pension Fund, disable Rebalance for now
+        if (selectedAccount === 'U15971587') {
+            alert('Smart Rebalancing is not configured for Pension Fund (PF) yet.');
             return null;
         }
 
@@ -1086,7 +1096,11 @@ export default function IBKRTracker() {
                                                     {p.systems.join(' + ')}
                                                 </span>
                                             ) : (
-                                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${p.systems[0] === 'NDX' ? 'bg-blue-500/20 text-blue-400' : p.systems[0] === 'RUI' ? 'bg-purple-500/20 text-purple-400' : 'bg-slate-500/20 text-slate-400'}`}>
+                                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${p.systems[0] === 'NDX' ? 'bg-blue-500/20 text-blue-400' :
+                                                    p.systems[0] === 'RUI' ? 'bg-purple-500/20 text-purple-400' :
+                                                        p.systems[0] === 'PF' ? 'bg-teal-500/20 text-teal-400' :
+                                                            'bg-slate-500/20 text-slate-400'
+                                                    }`}>
                                                     {p.systems[0]}
                                                 </span>
                                             )}
