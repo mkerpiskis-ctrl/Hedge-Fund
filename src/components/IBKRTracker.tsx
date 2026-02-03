@@ -87,6 +87,7 @@ export default function IBKRTracker() {
         action: 'BUY' | 'SELL' | 'HOLD';
         price: number;
     }[] | null>(null);
+    const [latestPrices, setLatestPrices] = useState<Record<string, number>>({});
 
     // Load data from localStorage with migration for old format
     useEffect(() => {
@@ -259,36 +260,49 @@ export default function IBKRTracker() {
         return () => clearInterval(interval);
     }, [fetchTwsData]);
 
-    // Fetch live prices for positions
+    // Fetch live prices for positions (Manual AND TWS)
     const fetchLivePrices = useCallback(async () => {
-        if (positions.length === 0) return;
+        // Collect unique symbols from both manual positions and Live TWS positions
+        const manualSymbols = positions.map(p => p.symbol);
+        const twsSymbols = twsPositions.map(p => p.symbol);
+        const uniqueSymbols = Array.from(new Set([...manualSymbols, ...twsSymbols]));
+
+        if (uniqueSymbols.length === 0) return;
 
         setIsLoading(true);
+        const newPrices: Record<string, number> = {};
         const updatedPositions = [...positions];
 
-        for (const pos of updatedPositions) {
+        for (const symbol of uniqueSymbols) {
             try {
-                const apiUrl = `/api/yahoo?symbol=${encodeURIComponent(pos.symbol)}&range=1d&interval=1d`;
+                const apiUrl = `/api/yahoo?symbol=${encodeURIComponent(symbol)}&range=1d&interval=1d`;
                 const res = await fetch(apiUrl);
                 if (res.ok) {
                     const data = await res.json();
                     const price = data.chart?.result?.[0]?.meta?.regularMarketPrice;
                     if (price) {
-                        pos.currentPrice = price;
-                        pos.marketValue = price * pos.quantity;
-                        pos.pnl = pos.marketValue - (pos.avgCost * pos.quantity);
-                        pos.pnlPercent = ((price - pos.avgCost) / pos.avgCost) * 100;
+                        newPrices[symbol] = price;
+
+                        // Update manual positions if match
+                        const manualPos = updatedPositions.find(p => p.symbol === symbol);
+                        if (manualPos) {
+                            manualPos.currentPrice = price;
+                            manualPos.marketValue = price * manualPos.quantity;
+                            manualPos.pnl = manualPos.marketValue - (manualPos.avgCost * manualPos.quantity);
+                            manualPos.pnlPercent = ((price - manualPos.avgCost) / manualPos.avgCost) * 100;
+                        }
                     }
                 }
             } catch (e) {
-                console.error(`Failed to fetch price for ${pos.symbol}:`, e);
+                console.error(`Failed to fetch price for ${symbol}:`, e);
             }
         }
 
+        setLatestPrices(prev => ({ ...prev, ...newPrices }));
         setPositions(updatedPositions);
         saveData(trades, updatedPositions, cashBalance);
         setIsLoading(false);
-    }, [positions, trades, cashBalance, saveData]);
+    }, [positions, twsPositions, trades, cashBalance, saveData]);
 
     // Parse IBKR Basket Trader CSV file
     // Format: Action,Quantity,Symbol,SecType,Exchange,Currency,TimeInForce,GoodTilDate,GoodAfterTime,OrderType,LmtPrice,AuxPrice,OcaGroup,OrderId,ParentOrderId,BasketTag,Account
@@ -617,9 +631,8 @@ export default function IBKRTracker() {
             const manualMatch = positions.find(p => p.symbol === twsPos.symbol);
             const systems = manualMatch ? manualMatch.systems : ['TWS']; // Default to TWS if unknown
 
-            // Reuse price from manual fetch if available, otherwise would need separate fetch
-            // Ideally we should add TWS symbols to the fetch list
-            const currentPrice = manualMatch?.currentPrice || null;
+            // Reuse price from manual fetch if available, OR use latest fetched price for TWS symbol
+            const currentPrice = manualMatch?.currentPrice || latestPrices[twsPos.symbol] || null;
             const marketValue = currentPrice ? (currentPrice * twsPos.position) : null;
             const pnl = (currentPrice && marketValue) ? (marketValue - (twsPos.avgCost * twsPos.position)) : null;
             const pnlPercent = (currentPrice && twsPos.avgCost) ? ((currentPrice - twsPos.avgCost) / twsPos.avgCost) * 100 : null;
