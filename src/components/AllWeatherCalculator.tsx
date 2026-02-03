@@ -30,6 +30,8 @@ const AllWeatherCalculator: React.FC = () => {
         return saved ? parseFloat(saved) : '';
     });
 
+    const [debugLogs, setDebugLogs] = useState<string[]>([]);
+
     const [assets, setAssets] = useState<Asset[]>(() => {
         const saved = localStorage.getItem('aw_assets_v3');
         if (saved) {
@@ -97,6 +99,11 @@ const AllWeatherCalculator: React.FC = () => {
             console.error("FX Fetch Error", e);
         }
 
+        setDebugLogs([]); // Clear logs
+        const logs: string[] = [];
+        const log = (msg: string) => logs.push(msg);
+        log(`FX Rates: EUR=${eurUsd}, GBP=${gbpUsd}`);
+
         for (let i = 0; i < newAssets.length; i++) {
             const asset = newAssets[i];
             let listTicker = asset.ticker;
@@ -115,10 +122,17 @@ const AllWeatherCalculator: React.FC = () => {
                     // Manual overrides for known USD tickers on LSE/Xetra
                     // FIXED: Using trim() to catch hidden spaces
                     const tick = asset.ticker.trim();
+
+                    // DEBUG SPECIFICALLY IGLN.L
+                    if (tick.includes('IGLN')) {
+                        log(`DEBUG IGLN: RawPrice=${price}, RawCurr=${currency}, Tick='${tick}'`);
+                    }
+
                     if (['IGLN.L', 'CNDX.L', 'DTLA.L', 'WEXU.DE'].includes(tick)) {
                         if (price) {
                             newAssets[i].currency = 'USD'; // Force display as USD
                             newAssets[i].price = price.toFixed(4);
+                            log(`OVERRIDE APPLIED for ${tick}: ${price.toFixed(4)} USD`);
                         }
                         // CRITICAL: Skip downstream conversion
                         continue;
@@ -129,7 +143,9 @@ const AllWeatherCalculator: React.FC = () => {
                     if (price) {
                         // Auto-convert to USD
                         if (currency === 'EUR') {
-                            price = price * eurUsd;
+                            const converted = price * eurUsd;
+                            log(`CONVERTING ${tick} (EUR): ${price} -> ${converted}`);
+                            price = converted;
                         } else if (currency === 'GBP') {
                             price = price * gbpUsd;
                         } else if (currency === 'GBp') { // Pence
@@ -141,11 +157,13 @@ const AllWeatherCalculator: React.FC = () => {
                 }
             } catch (error) {
                 console.error(`Failed to fetch for ${asset.ticker}`, error);
+                log(`Error fetching ${asset.ticker}: ${error}`);
             }
         }
 
         setAssets(newAssets);
         setIsRefreshing(false);
+        setDebugLogs(logs);
     };
 
     const safeParse = (val: number | string): number => {
@@ -321,7 +339,7 @@ const AllWeatherCalculator: React.FC = () => {
                                     className="text-[9px] text-slate-600 hover:text-rose-400 font-mono transition-colors"
                                     title="Force Reset Cached Data"
                                 >
-                                    v1.1 (RESET)
+                                    v1.2 (RESET)
                                 </button>
                             </div>
                         </div>
@@ -473,6 +491,18 @@ const AllWeatherCalculator: React.FC = () => {
                     {results.some(r => Math.abs(r.currentWeight - r.targetWeight) > 5) && (
                         <div className="mt-4 p-2 bg-rose-500/10 border border-rose-500/20 rounded-xl flex items-center justify-center space-x-2 text-rose-400 animate-pulse">
                             <span className="font-bold text-[10px] uppercase tracking-widest">Critical Allocation Drift Detected</span>
+                        </div>
+                    )}
+
+                    {/* DEBUG LOG VIEW */}
+                    {debugLogs.length > 0 && (
+                        <div className="mt-8 p-4 bg-black/50 rounded-xl border border-slate-800 font-mono text-[10px] text-slate-400">
+                            <h5 className="font-bold text-slate-300 mb-2">DEBUG LOGS (Sending to Developer):</h5>
+                            <div className="h-32 overflow-y-auto space-y-1">
+                                {debugLogs.map((l, i) => (
+                                    <div key={i} className="border-b border-slate-800/50 pb-1">{l}</div>
+                                ))}
+                            </div>
                         </div>
                     )}
                 </div>
