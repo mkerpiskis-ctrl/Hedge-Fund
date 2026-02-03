@@ -24,6 +24,8 @@ let positions = [];
 let executions = [];
 let accountIds = new Set();
 let lastError = null;
+let priceReqId = 10000;
+const pendingPriceRequests = new Map(); // reqId -> { resolve, symbol }
 
 // Initialize IB connection
 function connectToTWS() {
@@ -50,6 +52,10 @@ function connectToTWS() {
         // Request executions (Trade History)
         console.log('[TWS Bridge] Requesting executions...');
         ib.reqExecutions({}); // Empty filter = all executions
+
+        // Request Delayed Data (Type 3) if live not available
+        console.log('[TWS Bridge] Setting Market Data Type to Delayed...');
+        ib.reqMarketDataType(3);
     });
 
     ib.on(EventName.disconnected, () => {
@@ -156,6 +162,19 @@ function connectToTWS() {
         console.log(`[TWS Bridge] Executions updated: ${executions.length} trades found`);
     });
 
+    // Market Data (Tick Price)
+    ib.on(EventName.tickPrice, (reqId, field, price) => {
+        // field: 4 = Last, 9 = Close, 68 = Delayed Last, 75 = Delayed Close
+        if ([4, 9, 68, 75].includes(field) && price > 0) {
+            const req = pendingPriceRequests.get(reqId);
+            if (req) {
+                req.resolve(price);
+                pendingPriceRequests.delete(reqId); // Done
+                ib.cancelMktData(reqId);
+            }
+        }
+    });
+
     // Connect
     ib.connect();
 }
@@ -250,6 +269,54 @@ app.get('/api/executions', (req, res) => {
     }
 
     res.json(executions);
+});
+
+// Fetch Market Data Snapshot for multiple symbols
+app.post('/api/market-data', async (req, res) => {
+    if (!isConnected) {
+        return res.status(503).json({ error: 'Not connected to TWS' });
+    }
+
+    const { symbols } = req.body; // Expecting array of strings
+    if (!symbols || !Array.isArray(symbols) || symbols.length === 0) {
+        return res.status(400).json({ error: 'Invalid symbols array' });
+    }
+
+    const results = {};
+    const promises = symbols.map(symbol => {
+        return new Promise((resolve) => {
+            const reqId = priceReqId++;
+
+            // Timeout after 2 seconds
+            const timeout = setTimeout(() => {
+                if (pendingPriceRequests.has(reqId)) {
+                    pendingPriceRequests.delete(reqId);
+                    ib.cancelMktData(reqId);
+                    resolve(null); // Failed
+                }
+            }, 2000);
+
+            pendingPriceRequests.set(reqId, {
+                resolve: (price) => {
+                    clearTimeout(timeout);
+                    results[symbol] = price;
+                    resolve(price);
+                },
+                symbol
+            });
+
+            // Request Snapshot
+            ib.reqMktData(reqId, {
+                symbol: symbol,
+                secType: 'STK',
+                exchange: 'SMART',
+                currency: 'USD'
+            }, "", true, false);
+        });
+    });
+
+    await Promise.all(promises);
+    res.json(results);
 });
 
 // Request fresh account update

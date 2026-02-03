@@ -271,9 +271,43 @@ export default function IBKRTracker() {
 
         setIsLoading(true);
         const newPrices: Record<string, number> = {};
+
+        let symbolsToFetch = [...uniqueSymbols];
+
+        // 1. Try TWS Bridge if connected (Batch fetch)
+        if (twsConnected) {
+            try {
+                const res = await fetch(`${TWS_BRIDGE_URL}/api/market-data`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ symbols: uniqueSymbols })
+                });
+
+                if (res.ok) {
+                    const twsData = await res.json();
+
+                    Object.entries(twsData).forEach(([sym, price]) => {
+                        // Validate price (must be number > 0)
+                        if (typeof price === 'number' && price > 0) {
+                            newPrices[sym] = price;
+                        }
+                    });
+
+                    // Identify symbols that failed to resolve in TWS
+                    symbolsToFetch = uniqueSymbols.filter(s => !newPrices[s]);
+                }
+            } catch (e) {
+                console.error('TWS Market Data fetch failed:', e);
+            }
+        }
+
+        // 2. Fallback to Yahoo for missing symbols
         const updatedPositions = [...positions];
 
-        for (const symbol of uniqueSymbols) {
+        // Process known prices immediately to update UI faster? 
+        // No, let's wait for full batch or partial updates.
+
+        for (const symbol of symbolsToFetch) {
             try {
                 const apiUrl = `/api/yahoo?symbol=${encodeURIComponent(symbol)}&range=1d&interval=1d`;
                 const res = await fetch(apiUrl);
@@ -282,27 +316,31 @@ export default function IBKRTracker() {
                     const price = data.chart?.result?.[0]?.meta?.regularMarketPrice;
                     if (price) {
                         newPrices[symbol] = price;
-
-                        // Update manual positions if match
-                        const manualPos = updatedPositions.find(p => p.symbol === symbol);
-                        if (manualPos) {
-                            manualPos.currentPrice = price;
-                            manualPos.marketValue = price * manualPos.quantity;
-                            manualPos.pnl = manualPos.marketValue - (manualPos.avgCost * manualPos.quantity);
-                            manualPos.pnlPercent = ((price - manualPos.avgCost) / manualPos.avgCost) * 100;
-                        }
                     }
                 }
             } catch (e) {
-                console.error(`Failed to fetch price for ${symbol}:`, e);
+                console.error(`Failed to fetch Yahoo price for ${symbol}:`, e);
             }
         }
 
+        // Update State
         setLatestPrices(prev => ({ ...prev, ...newPrices }));
+
+        // Update Manual Positions with new prices
+        updatedPositions.forEach(pos => {
+            const price = newPrices[pos.symbol];
+            if (price) {
+                pos.currentPrice = price;
+                pos.marketValue = price * pos.quantity;
+                pos.pnl = pos.marketValue - (pos.avgCost * pos.quantity);
+                pos.pnlPercent = ((price - pos.avgCost) / pos.avgCost) * 100;
+            }
+        });
+
         setPositions(updatedPositions);
         saveData(trades, updatedPositions, cashBalance);
         setIsLoading(false);
-    }, [positions, twsPositions, trades, cashBalance, saveData]);
+    }, [positions, twsPositions, trades, cashBalance, saveData, twsConnected]);
 
     // Parse IBKR Basket Trader CSV file
     // Format: Action,Quantity,Symbol,SecType,Exchange,Currency,TimeInForce,GoodTilDate,GoodAfterTime,OrderType,LmtPrice,AuxPrice,OcaGroup,OrderId,ParentOrderId,BasketTag,Account
