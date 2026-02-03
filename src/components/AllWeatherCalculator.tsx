@@ -127,8 +127,11 @@ const AllWeatherCalculator: React.FC = () => {
             const indicators = result?.indicators;
             let foundPrice = null;
 
+            console.log('[IGLN DEBUG] indicators:', JSON.stringify(indicators, null, 2));
+
             // Priority 1: AdjClose
             const adjCloseArr = indicators?.adjclose?.[0]?.adjclose;
+            console.log('[IGLN DEBUG] adjCloseArr:', adjCloseArr);
             if (Array.isArray(adjCloseArr)) {
                 const valid = adjCloseArr.filter((n: any) => typeof n === 'number');
                 if (valid.length > 0) foundPrice = valid[valid.length - 1];
@@ -137,11 +140,14 @@ const AllWeatherCalculator: React.FC = () => {
             // Priority 2: Quote Close
             if (!foundPrice) {
                 const closeArr = indicators?.quote?.[0]?.close;
+                console.log('[IGLN DEBUG] closeArr:', closeArr);
                 if (Array.isArray(closeArr)) {
                     const valid = closeArr.filter((n: any) => typeof n === 'number');
                     if (valid.length > 0) foundPrice = valid[valid.length - 1];
                 }
             }
+
+            console.log('[IGLN DEBUG] foundPrice:', foundPrice, '| Original price:', price);
 
             if (foundPrice) {
                 price = foundPrice;
