@@ -136,7 +136,6 @@ export default function IBKRTracker() {
     const [realTestTrades, setRealTestTrades] = useState<RealTestTrade[]>([]);
     const [realTestSyncAnalysis, setRealTestSyncAnalysis] = useState<RealTestSyncAnalysis | null>(null);
     const [showRealTestSync, setShowRealTestSync] = useState(false);
-    const CASH_BUFFER = 1500; // $1,500 safety buffer
 
     // Load data from localStorage with migration for old format
     useEffect(() => {
