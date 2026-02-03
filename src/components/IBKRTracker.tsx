@@ -206,6 +206,8 @@ export default function IBKRTracker() {
             const dateStr = e.time.substring(0, 8); // YYYYMMDD
             const formattedDate = `${dateStr.substring(0, 4)}-${dateStr.substring(4, 6)}-${dateStr.substring(6, 8)}`;
 
+            const price = e.price || e.avgPrice || 0;
+
             return {
                 id: `exec_${e.execId}`,
                 date: formattedDate,
@@ -213,8 +215,8 @@ export default function IBKRTracker() {
                 symbol: e.symbol,
                 action: e.side === 'BOT' ? 'BUY' : 'SELL' as 'BUY' | 'SELL',
                 quantity: e.shares,
-                price: e.price,
-                totalValue: e.shares * e.price,
+                price: price,
+                totalValue: e.shares * price,
                 importedAt: new Date().toISOString(),
                 isExecution: true, // Flag to identify TWS data
                 account: e.acctNumber
@@ -304,6 +306,7 @@ export default function IBKRTracker() {
             const action = cols[0]?.toUpperCase();
             const quantity = parseFloat(cols[1]) || 0;
             const symbol = cols[2] || '';
+            const price = parseFloat(cols[10]) || 0; // LmtPrice
             const basketTag = cols[15] || '';
 
             // Determine system from BasketTag
@@ -315,8 +318,8 @@ export default function IBKRTracker() {
                 symbol: symbol,
                 action: action === 'BUY' ? 'BUY' : 'SELL',
                 quantity: Math.abs(quantity),
-                price: 0, // Will be fetched live or entered manually
-                totalValue: 0,
+                price: price, // Use parsed price
+                totalValue: Math.abs(quantity) * price,
                 system: system,
                 importedAt: new Date().toISOString()
             };
