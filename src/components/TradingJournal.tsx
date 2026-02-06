@@ -1,4 +1,6 @@
+```typescript
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 
 // ============= Types =============
 interface SetupCategory {
@@ -232,7 +234,7 @@ const TradingJournal = () => {
         else if (pnl < 0) result = 'LOSS';
 
         const newEntry: JournalEntry = {
-            id: editingEntry?.id || `entry_${Date.now()}`,
+            id: editingEntry?.id || `entry_${ Date.now() } `,
             date: formData.date,
             time: formData.time,
             symbol: formData.symbol.toUpperCase(),
@@ -313,7 +315,7 @@ const TradingJournal = () => {
     const addSetup = () => {
         if (!newSetupName.trim()) return;
         const newSetup: SetupCategory = {
-            id: `setup_${Date.now()}`,
+            id: `setup_${ Date.now() } `,
             name: newSetupName.trim(),
             criteria: [],
             color: ['blue', 'purple', 'emerald', 'amber', 'rose', 'cyan'][Math.floor(Math.random() * 6)],
@@ -362,7 +364,7 @@ const TradingJournal = () => {
     // Helper to render stat card
     const StatCard = ({ title, value, type = 'neutral', subtext = '' }: { title: string, value: string, type?: 'win' | 'loss' | 'neutral', subtext?: string }) => (
         <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700 text-center">
-            <div className={`text-2xl font-bold ${type === 'win' ? 'text-emerald-400' : type === 'loss' ? 'text-rose-400' : 'text-white'}`}>
+            <div className={`text - 2xl font - bold ${ type === 'win' ? 'text-emerald-400' : type === 'loss' ? 'text-rose-400' : 'text-white' } `}>
                 {value}
             </div>
             <div className="text-[10px] text-slate-500 uppercase tracking-wider mt-1">{title}</div>
@@ -402,28 +404,31 @@ const TradingJournal = () => {
             <div className="flex space-x-1 border-b border-slate-700/50">
                 <button
                     onClick={() => setActiveSubTab('history')}
-                    className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors ${activeSubTab === 'history'
-                        ? 'bg-slate-800 text-amber-400 border-t border-x border-slate-700'
-                        : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/30'
-                        }`}
+                    className={`px - 4 py - 2 text - sm font - medium rounded - t - lg transition - colors ${
+    activeSubTab === 'history'
+    ? 'bg-slate-800 text-amber-400 border-t border-x border-slate-700'
+    : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/30'
+} `}
                 >
                     📜 History
                 </button>
                 <button
                     onClick={() => setActiveSubTab('totalStats')}
-                    className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors ${activeSubTab === 'totalStats'
-                        ? 'bg-slate-800 text-amber-400 border-t border-x border-slate-700'
-                        : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/30'
-                        }`}
+                    className={`px - 4 py - 2 text - sm font - medium rounded - t - lg transition - colors ${
+    activeSubTab === 'totalStats'
+    ? 'bg-slate-800 text-amber-400 border-t border-x border-slate-700'
+    : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/30'
+} `}
                 >
                     📈 Total Stats
                 </button>
                 <button
                     onClick={() => setActiveSubTab('setupStats')}
-                    className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors ${activeSubTab === 'setupStats'
-                        ? 'bg-slate-800 text-amber-400 border-t border-x border-slate-700'
-                        : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/30'
-                        }`}
+                    className={`px - 4 py - 2 text - sm font - medium rounded - t - lg transition - colors ${
+    activeSubTab === 'setupStats'
+    ? 'bg-slate-800 text-amber-400 border-t border-x border-slate-700'
+    : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/30'
+} `}
                 >
                     🎯 By Setup
                 </button>
@@ -457,10 +462,11 @@ const TradingJournal = () => {
                                         onClick={() => setFilterCriteria(prev =>
                                             prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c]
                                         )}
-                                        className={`px-2 py-0.5 text-[10px] rounded border transition-colors ${filterCriteria.includes(c)
-                                            ? 'bg-amber-500/20 text-amber-400 border-amber-500/50'
-                                            : 'bg-slate-700 text-slate-400 border-slate-600 hover:border-slate-500'
-                                            }`}
+                                        className={`px - 2 py - 0.5 text - [10px] rounded border transition - colors ${
+    filterCriteria.includes(c)
+    ? 'bg-amber-500/20 text-amber-400 border-amber-500/50'
+    : 'bg-slate-700 text-slate-400 border-slate-600 hover:border-slate-500'
+} `}
                                     >
                                         {c}
                                     </button>
@@ -506,7 +512,7 @@ const TradingJournal = () => {
                                                     <div className="font-bold text-slate-200">{entry.symbol}</div>
                                                 </td>
                                                 <td className="p-3">
-                                                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${getSetupColor(entry.setupId)}`}>
+                                                    <span className={`px - 2 py - 0.5 rounded text - [10px] font - bold border ${ getSetupColor(entry.setupId) } `}>
                                                         {getSetupById(entry.setupId)?.name || 'Unknown'}
                                                     </span>
                                                     {entry.criteriaUsed.length > 0 && (
@@ -522,10 +528,10 @@ const TradingJournal = () => {
                                                 </td>
                                                 <td className="p-3 text-right font-mono text-xs">${entry.entry.toFixed(2)}</td>
                                                 <td className="p-3 text-right font-mono text-xs">${entry.exit.toFixed(2)}</td>
-                                                <td className={`p-3 text-right font-bold font-mono ${entry.rMultiple >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                <td className={`p - 3 text - right font - bold font - mono ${ entry.rMultiple >= 0 ? 'text-emerald-400' : 'text-rose-400' } `}>
                                                     {entry.rMultiple >= 0 ? '+' : ''}{entry.rMultiple.toFixed(2)}R
                                                 </td>
-                                                <td className={`p-3 text-right font-bold font-mono ${entry.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                <td className={`p - 3 text - right font - bold font - mono ${ entry.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400' } `}>
                                                     {entry.pnl >= 0 ? '+' : ''}${entry.pnl.toLocaleString()}
                                                 </td>
                                                 <td className="p-3 text-center">
@@ -570,17 +576,17 @@ const TradingJournal = () => {
             {activeSubTab === 'totalStats' && (
                 <div className="space-y-6 animate-fade-in">
                     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                        <StatCard title="Win Rate" value={`${currentStats.winRate.toFixed(1)}%`} type={currentStats.winRate >= 50 ? 'win' : 'loss'} />
+                        <StatCard title="Win Rate" value={`${ currentStats.winRate.toFixed(1) }% `} type={currentStats.winRate >= 50 ? 'win' : 'loss'} />
                         <StatCard title="Profit Factor" value={currentStats.profitFactor.toFixed(2)} type={currentStats.profitFactor >= 1.5 ? 'win' : 'neutral'} />
-                        <StatCard title="Total P&L" value={`$${currentStats.totalPnl.toLocaleString()}`} type={currentStats.totalPnl >= 0 ? 'win' : 'loss'} />
-                        <StatCard title="Avg R Check" value={`${currentStats.avgR.toFixed(2)}R`} type={currentStats.avgR > 0 ? 'win' : 'loss'} />
+                        <StatCard title="Total P&L" value={`$${ currentStats.totalPnl.toLocaleString() } `} type={currentStats.totalPnl >= 0 ? 'win' : 'loss'} />
+                        <StatCard title="Avg R Check" value={`${ currentStats.avgR.toFixed(2) } R`} type={currentStats.avgR > 0 ? 'win' : 'loss'} />
                     </div>
 
                     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                         <StatCard title="Total Trades" value={currentStats.totalTrades.toString()} />
                         <StatCard title="Wins" value={currentStats.wins.toString()} type="win" />
                         <StatCard title="Losses" value={currentStats.losses.toString()} type="loss" />
-                        <StatCard title="Risk/Reward Ratio" value={`1 : ${(currentStats.avgWinR / (Math.abs(currentStats.avgLossR) || 1)).toFixed(2)}`} />
+                        <StatCard title="Risk/Reward Ratio" value={`1 : ${ (currentStats.avgWinR / (Math.abs(currentStats.avgLossR) || 1)).toFixed(2) } `} />
                     </div>
 
                     <div className="bg-slate-800/30 p-6 rounded-lg border border-slate-700">
@@ -589,8 +595,8 @@ const TradingJournal = () => {
                             <div>
                                 <h4 className="text-xs uppercase text-slate-500 mb-2">P&L Distribution</h4>
                                 <div className="h-4 bg-slate-700/50 rounded-full overflow-hidden flex">
-                                    <div style={{ width: `${currentStats.winRate}%` }} className="bg-emerald-500/50 h-full"></div>
-                                    <div style={{ width: `${100 - currentStats.winRate}%` }} className="bg-rose-500/50 h-full"></div>
+                                    <div style={{ width: `${ currentStats.winRate }% ` }} className="bg-emerald-500/50 h-full"></div>
+                                    <div style={{ width: `${ 100 - currentStats.winRate }% ` }} className="bg-rose-500/50 h-full"></div>
                                 </div>
                                 <div className="flex justify-between text-xs text-slate-400 mt-1">
                                     <span>{currentStats.wins} Wins</span>
@@ -631,10 +637,11 @@ const TradingJournal = () => {
                                         setFilterSetup(s.id);
                                         setFilterCriteria([]); // Reset criteria when switching setup
                                     }}
-                                    className={`w-full text-left px-4 py-3 rounded-lg border transition-all ${filterSetup === s.id
-                                        ? `bg-slate-800 border-${getSetupColor(s.id).split(' ')[2].replace('border-', '')} shadow-lg ring-1 ring-white/10`
-                                        : 'bg-slate-800/30 border-transparent hover:bg-slate-800/50 text-slate-400'
-                                        }`}
+                                    className={`w - full text - left px - 4 py - 3 rounded - lg border transition - all ${
+    filterSetup === s.id
+    ? `bg-slate-800 border-${getSetupColor(s.id).split(' ')[2].replace('border-', '')} shadow-lg ring-1 ring-white/10`
+    : 'bg-slate-800/30 border-transparent hover:bg-slate-800/50 text-slate-400'
+} `}
                                 >
                                     <div className="font-bold text-slate-200">{s.name}</div>
                                     <div className="text-[10px] text-slate-500 mt-1">{entries.filter(e => e.setupId === s.id).length} trades</div>
@@ -662,10 +669,11 @@ const TradingJournal = () => {
                                                         onClick={() => setFilterCriteria(prev =>
                                                             isActive ? prev.filter(x => x !== c) : [...prev, c]
                                                         )}
-                                                        className={`px-3 py-1.5 text-xs rounded-md border transition-all ${isActive
-                                                            ? 'bg-amber-500/20 text-amber-400 border-amber-500/50 shadow shadow-amber-900/20'
-                                                            : 'bg-slate-700/50 text-slate-400 border-slate-600 hover:bg-slate-700 hover:border-slate-500'
-                                                            }`}
+                                                        className={`px - 3 py - 1.5 text - xs rounded - md border transition - all ${
+    isActive
+        ? 'bg-amber-500/20 text-amber-400 border-amber-500/50 shadow shadow-amber-900/20'
+        : 'bg-slate-700/50 text-slate-400 border-slate-600 hover:bg-slate-700 hover:border-slate-500'
+} `}
                                                     >
                                                         {isActive ? '✓ ' : ''}{c}
                                                     </button>
@@ -679,9 +687,9 @@ const TradingJournal = () => {
 
                                     {/* Setup Stats Grid */}
                                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                        <StatCard title="Setup Win Rate" value={`${currentStats.winRate.toFixed(1)}%`} type={currentStats.winRate >= 50 ? 'win' : 'loss'} />
-                                        <StatCard title="Setup P&L" value={`$${currentStats.totalPnl.toLocaleString()}`} type={currentStats.totalPnl >= 0 ? 'win' : 'loss'} />
-                                        <StatCard title="Avg R" value={`${currentStats.avgR.toFixed(2)}R`} type={currentStats.avgR > 0 ? 'win' : 'loss'} />
+                                        <StatCard title="Setup Win Rate" value={`${ currentStats.winRate.toFixed(1) }% `} type={currentStats.winRate >= 50 ? 'win' : 'loss'} />
+                                        <StatCard title="Setup P&L" value={`$${ currentStats.totalPnl.toLocaleString() } `} type={currentStats.totalPnl >= 0 ? 'win' : 'loss'} />
+                                        <StatCard title="Avg R" value={`${ currentStats.avgR.toFixed(2) } R`} type={currentStats.avgR > 0 ? 'win' : 'loss'} />
                                         <StatCard title="Profit Factor" value={currentStats.profitFactor.toFixed(2)} />
                                     </div>
 
@@ -739,7 +747,7 @@ const TradingJournal = () => {
                                 {setups.map(setup => (
                                     <div key={setup.id} className="bg-slate-800/30 p-4 rounded-lg border border-slate-700">
                                         <div className="flex items-center justify-between mb-3">
-                                            <span className={`px-2 py-1 rounded text-sm font-bold border ${getSetupColor(setup.id)}`}>
+                                            <span className={`px - 2 py - 1 rounded text - sm font - bold border ${ getSetupColor(setup.id) } `}>
                                                 {setup.name}
                                             </span>
                                             <button onClick={() => deleteSetup(setup.id)} className="text-slate-500 hover:text-rose-400 text-xs uppercase font-bold">Delete</button>
@@ -868,10 +876,11 @@ const TradingJournal = () => {
                                                             ? p.criteriaUsed.filter(x => x !== c)
                                                             : [...p.criteriaUsed, c]
                                                     }))}
-                                                    className={`px-2 py-1 text-xs rounded border transition-all ${formData.criteriaUsed.includes(c)
-                                                        ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/50'
-                                                        : 'bg-slate-700 text-slate-400 border-slate-600'
-                                                        }`}
+                                                    className={`px - 2 py - 1 text - xs rounded border transition - all ${
+    formData.criteriaUsed.includes(c)
+    ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/50'
+    : 'bg-slate-700 text-slate-400 border-slate-600'
+} `}
                                                 >
                                                     {formData.criteriaUsed.includes(c) ? '✓ ' : ''}{c}
                                                 </button>
@@ -1003,72 +1012,73 @@ const TradingJournal = () => {
 
             {/* Image Modal */}
             {imageModal && (
-                <div
-                    className="fixed inset-0 bg-black/95 z-[60] flex items-center justify-center backdrop-blur-sm overflow-hidden"
-                    onClick={() => setImageModal(null)}
-                    onWheel={(e) => {
-                        e.stopPropagation();
-                        // Adjust zoom sensitivity as needed.
-                        // DeltaY is usually 100 or -100 per tick. -0.001 gives a smooth zoom control.
-                        const delta = -e.deltaY * 0.001;
-                        setImageModal(prev => {
-                            if (!prev) return null;
-                            const newZoom = Math.min(Math.max(0.1, prev.zoom + delta), 10);
-                            return { ...prev, zoom: newZoom };
-                        });
-                    }}
-                    onMouseDown={(e) => {
-                        if (!imageModal) return;
-                        dragRef.current.isDragging = true;
-                        dragRef.current.startX = e.clientX;
-                        dragRef.current.startY = e.clientY;
-                        dragRef.current.lastX = imageModal.x;
-                        dragRef.current.lastY = imageModal.y;
-                    }}
-                    onMouseMove={(e) => {
-                        if (!imageModal || !dragRef.current.isDragging) return;
-                        e.preventDefault();
-                        const dx = e.clientX - dragRef.current.startX;
-                        const dy = e.clientY - dragRef.current.startY;
-                        const newX = dragRef.current.lastX + dx;
-                        const newY = dragRef.current.lastY + dy;
-
-                        // We use ref for calculation but must update state to render
-                        // To avoid too many re-renders, requestAnimationFrame could be used, but React 18 handles this decently.
-                        setImageModal(prev => prev ? { ...prev, x: newX, y: newY } : null);
-                    }}
-                    onMouseUp={() => {
-                        dragRef.current.isDragging = false;
-                    }}
-                    onMouseLeave={() => {
-                        dragRef.current.isDragging = false;
-                    }}
-                >
+                createPortal(
                     <div
-                        className="relative w-full h-full flex items-center justify-center"
-                        onClick={e => e.stopPropagation()}
-                        style={{ cursor: dragRef.current.isDragging ? 'grabbing' : 'grab' }}
+                        className="fixed inset-0 bg-black/95 z-[9999] flex items-center justify-center backdrop-blur-sm overflow-hidden"
+                        onClick={() => setImageModal(null)}
+                        onWheel={(e) => {
+                            e.stopPropagation();
+                            // Adjust zoom sensitivity as needed.
+                            // DeltaY is usually 100 or -100 per tick. -0.001 gives a smooth zoom control.
+                            const delta = -e.deltaY * 0.001;
+                            setImageModal(prev => {
+                                if (!prev) return null;
+                                const newZoom = Math.min(Math.max(0.1, prev.zoom + delta), 10);
+                                return { ...prev, zoom: newZoom };
+                            });
+                        }}
+                        onMouseDown={(e) => {
+                            if (!imageModal) return;
+                            dragRef.current.isDragging = true;
+                            dragRef.current.startX = e.clientX;
+                            dragRef.current.startY = e.clientY;
+                            dragRef.current.lastX = imageModal.x;
+                            dragRef.current.lastY = imageModal.y;
+                        }}
+                        onMouseMove={(e) => {
+                            if (!imageModal || !dragRef.current.isDragging) return;
+                            e.preventDefault();
+                            const dx = e.clientX - dragRef.current.startX;
+                            const dy = e.clientY - dragRef.current.startY;
+                            const newX = dragRef.current.lastX + dx;
+                            const newY = dragRef.current.lastY + dy;
+
+                            // We use ref for calculation but must update state to render
+                            // To avoid too many re-renders, requestAnimationFrame could be used, but React 18 handles this decently.
+                            setImageModal(prev => prev ? { ...prev, x: newX, y: newY } : null);
+                        }}
+                        onMouseUp={() => {
+                            dragRef.current.isDragging = false;
+                        }}
+                        onMouseLeave={() => {
+                            dragRef.current.isDragging = false;
+                        }}
                     >
-                        <img
-                            src={imageModal.src}
-                            alt="Full size"
-                            draggable={false}
-                            style={{
-                                transform: `translate(${imageModal.x}px, ${imageModal.y}px) scale(${imageModal.zoom})`,
-                                transition: dragRef.current.isDragging ? 'none' : 'transform 0.1s ease-out',
-                                maxWidth: 'none',
-                                maxHeight: 'none',
-                            }}
-                            className="object-contain shadow-2xl select-none"
-                        />
-                        <button
-                            onClick={() => setImageModal(null)}
-                            className="absolute top-6 right-6 w-12 h-12 bg-slate-800/50 hover:bg-rose-600 text-white rounded-full text-2xl flex items-center justify-center transition-colors z-50"
+                        <div
+                            className="relative w-full h-full flex items-center justify-center"
+                            onClick={e => e.stopPropagation()}
+                            style={{ cursor: dragRef.current.isDragging ? 'grabbing' : 'grab' }}
                         >
-                            ✕
-                        </button>
-                    </div>
-                </div>
+                            <img
+                                src={imageModal.src}
+                                alt="Full size"
+                                draggable={false}
+                                style={{
+                                    transform: `translate(${ imageModal.x }px, ${ imageModal.y }px) scale(${ imageModal.zoom })`,
+                                    transition: dragRef.current.isDragging ? 'none' : 'transform 0.1s ease-out',
+                                    maxWidth: 'none',
+                                    maxHeight: 'none',
+                                }}
+                                className="object-contain shadow-2xl select-none"
+                            />
+                            <button
+                                onClick={() => setImageModal(null)}
+                                className="absolute top-6 right-6 w-12 h-12 bg-slate-800/50 hover:bg-rose-600 text-white rounded-full text-2xl flex items-center justify-center transition-colors z-50"
+                            >
+                                ✕
+                            </button>
+                        </div>
+                    </div>, document.body)
             )}
         </div>
     );
