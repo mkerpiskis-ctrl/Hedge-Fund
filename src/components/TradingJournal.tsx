@@ -92,7 +92,8 @@ const TradingJournal = () => {
     const [showNewEntry, setShowNewEntry] = useState(false);
     const [showSetupManager, setShowSetupManager] = useState(false);
     const [editingEntry, setEditingEntry] = useState<JournalEntry | null>(null);
-    const [imageModal, setImageModal] = useState<{ src: string; zoom: number } | null>(null);
+    const [imageModal, setImageModal] = useState<{ src: string; zoom: number; x: number; y: number } | null>(null);
+    const dragRef = useRef({ startX: 0, startY: 0, lastX: 0, lastY: 0, isDragging: false });
 
     // Setup Manager State
     const [newSetupName, setNewSetupName] = useState('');
@@ -530,7 +531,7 @@ const TradingJournal = () => {
                                                 <td className="p-3 text-center">
                                                     {entry.images.length > 0 ? (
                                                         <button
-                                                            onClick={() => setImageModal({ src: entry.images[0], zoom: 1 })}
+                                                            onClick={() => setImageModal({ src: entry.images[0], zoom: 1, x: 0, y: 0 })}
                                                             className="text-amber-400 hover:text-amber-300 transition-colors"
                                                         >
                                                             🖼️
@@ -946,7 +947,7 @@ const TradingJournal = () => {
                                                     src={img}
                                                     alt={`Screenshot`}
                                                     className="w-20 h-20 object-cover rounded border border-slate-700 cursor-zoom-in"
-                                                    onClick={() => setImageModal({ src: img, zoom: 1 })}
+                                                    onClick={() => setImageModal({ src: img, zoom: 1, x: 0, y: 0 })}
                                                 />
                                                 <button
                                                     onClick={() => removeImage(idx)}
@@ -1003,45 +1004,85 @@ const TradingJournal = () => {
             {/* Image Modal */}
             {imageModal && (
                 <div
-                    className="fixed inset-0 bg-black/95 z-[60] flex items-center justify-center p-4 backdrop-blur-sm"
+                    className="fixed inset-0 bg-black/95 z-[60] flex items-center justify-center backdrop-blur-sm overflow-hidden"
                     onClick={() => setImageModal(null)}
                     onWheel={(e) => {
                         e.stopPropagation();
-                        // Adjust zoom sensitivity as needed. 
-                        // DeltaY is usually 100 or -100 per tick. -0.001 gives a smooth zoom control.
                         const delta = -e.deltaY * 0.001;
                         setImageModal(prev => {
                             if (!prev) return null;
-                            const newZoom = Math.min(Math.max(0.5, prev.zoom + delta), 5);
+                            const newZoom = Math.min(Math.max(0.1, prev.zoom + delta), 10);
                             return { ...prev, zoom: newZoom };
                         });
                     }}
+                    onMouseDown={(e) => {
+                        if (!imageModal) return;
+                        dragRef.current.isDragging = true;
+                        dragRef.current.startX = e.clientX;
+                        dragRef.current.startY = e.clientY;
+                        dragRef.current.lastX = imageModal.x;
+                        dragRef.current.lastY = imageModal.y;
+                    }}
+                    onMouseMove={(e) => {
+                        if (!imageModal || !dragRef.current.isDragging) return;
+                        e.preventDefault();
+                        const dx = e.clientX - dragRef.current.startX;
+                        const dy = e.clientY - dragRef.current.startY;
+                        const newX = dragRef.current.lastX + dx;
+                        const newY = dragRef.current.lastY + dy;
+
+                        // We use ref for calculation but must update state to render
+                        // To avoid too many re-renders, requestAnimationFrame could be used, but React 18 handles this decently.
+                        setImageModal(prev => prev ? { ...prev, x: newX, y: newY } : null);
+                    }}
+                    onMouseUp={() => {
+                        dragRef.current.isDragging = false;
+                    }}
+                    onMouseLeave={() => {
+                        dragRef.current.isDragging = false;
+                    }}
                 >
-                    <div className="relative w-full h-full flex items-center justify-center overflow-hidden" onClick={e => e.stopPropagation()}>
+                    <div
+                        className="relative w-full h-full flex items-center justify-center"
+                        onClick={e => e.stopPropagation()}
+                        style={{ cursor: dragRef.current.isDragging ? 'grabbing' : 'grab' }}
+                    >
                         <img
                             src={imageModal.src}
                             alt="Full size"
-                            style={{ transform: `scale(${imageModal.zoom})`, transition: 'transform 0.1s ease-out' }}
-                            className="max-w-[95%] max-h-[90vh] object-contain shadow-2xl"
+                            draggable={false}
+                            style={{
+                                transform: `translate(${imageModal.x}px, ${imageModal.y}px) scale(${imageModal.zoom})`,
+                                transition: dragRef.current.isDragging ? 'none' : 'transform 0.1s ease-out',
+                                maxWidth: 'none',
+                                maxHeight: 'none',
+                            }}
+                            className="object-contain shadow-2xl select-none"
                         />
-                        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center space-x-4 bg-slate-900/90 px-6 py-3 rounded-full border border-slate-700 shadow-xl">
+                        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center space-x-4 bg-slate-900/90 px-6 py-3 rounded-full border border-slate-700 shadow-xl" onClick={e => e.stopPropagation()}>
                             <button
-                                onClick={() => setImageModal(p => p ? { ...p, zoom: Math.max(0.5, p.zoom - 0.5) } : null)}
+                                onClick={() => setImageModal(p => p ? { ...p, zoom: Math.max(0.1, p.zoom - 0.5) } : null)}
                                 className="w-8 h-8 flex items-center justify-center bg-slate-700 rounded-full text-white hover:bg-slate-600 text-lg"
                             >
                                 −
                             </button>
                             <span className="text-sm font-mono text-amber-500 w-16 text-center">{(imageModal.zoom * 100).toFixed(0)}%</span>
                             <button
-                                onClick={() => setImageModal(p => p ? { ...p, zoom: Math.min(5, p.zoom + 0.5) } : null)}
+                                onClick={() => setImageModal(p => p ? { ...p, zoom: Math.min(10, p.zoom + 0.5) } : null)}
                                 className="w-8 h-8 flex items-center justify-center bg-slate-700 rounded-full text-white hover:bg-slate-600 text-lg"
                             >
                                 +
                             </button>
+                            <button
+                                onClick={() => setImageModal(p => p ? { ...p, zoom: 1, x: 0, y: 0 } : null)}
+                                className="px-3 py-1 bg-slate-700 rounded-full text-white text-xs hover:bg-slate-600"
+                            >
+                                RESET
+                            </button>
                         </div>
                         <button
                             onClick={() => setImageModal(null)}
-                            className="absolute top-6 right-6 w-12 h-12 bg-slate-800/50 hover:bg-rose-600 text-white rounded-full text-2xl flex items-center justify-center transition-colors"
+                            className="absolute top-6 right-6 w-12 h-12 bg-slate-800/50 hover:bg-rose-600 text-white rounded-full text-2xl flex items-center justify-center transition-colors z-50"
                         >
                             ✕
                         </button>
