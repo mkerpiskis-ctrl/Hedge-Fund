@@ -1008,6 +1008,8 @@ const TradingJournal = () => {
                     onClick={() => setImageModal(null)}
                     onWheel={(e) => {
                         e.stopPropagation();
+                        // Adjust zoom sensitivity as needed.
+                        // DeltaY is usually 100 or -100 per tick. -0.001 gives a smooth zoom control.
                         const delta = -e.deltaY * 0.001;
                         setImageModal(prev => {
                             if (!prev) return null;
@@ -1059,27 +1061,6 @@ const TradingJournal = () => {
                             }}
                             className="object-contain shadow-2xl select-none"
                         />
-                        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center space-x-4 bg-slate-900/90 px-6 py-3 rounded-full border border-slate-700 shadow-xl" onClick={e => e.stopPropagation()}>
-                            <button
-                                onClick={() => setImageModal(p => p ? { ...p, zoom: Math.max(0.1, p.zoom - 0.5) } : null)}
-                                className="w-8 h-8 flex items-center justify-center bg-slate-700 rounded-full text-white hover:bg-slate-600 text-lg"
-                            >
-                                −
-                            </button>
-                            <span className="text-sm font-mono text-amber-500 w-16 text-center">{(imageModal.zoom * 100).toFixed(0)}%</span>
-                            <button
-                                onClick={() => setImageModal(p => p ? { ...p, zoom: Math.min(10, p.zoom + 0.5) } : null)}
-                                className="w-8 h-8 flex items-center justify-center bg-slate-700 rounded-full text-white hover:bg-slate-600 text-lg"
-                            >
-                                +
-                            </button>
-                            <button
-                                onClick={() => setImageModal(p => p ? { ...p, zoom: 1, x: 0, y: 0 } : null)}
-                                className="px-3 py-1 bg-slate-700 rounded-full text-white text-xs hover:bg-slate-600"
-                            >
-                                RESET
-                            </button>
-                        </div>
                         <button
                             onClick={() => setImageModal(null)}
                             className="absolute top-6 right-6 w-12 h-12 bg-slate-800/50 hover:bg-rose-600 text-white rounded-full text-2xl flex items-center justify-center transition-colors z-50"
