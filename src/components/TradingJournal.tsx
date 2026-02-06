@@ -402,8 +402,8 @@ const TradingJournal = () => {
                 <button
                     onClick={() => setActiveSubTab('history')}
                     className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors ${activeSubTab === 'history'
-                            ? 'bg-slate-800 text-amber-400 border-t border-x border-slate-700'
-                            : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/30'
+                        ? 'bg-slate-800 text-amber-400 border-t border-x border-slate-700'
+                        : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/30'
                         }`}
                 >
                     📜 History
@@ -411,8 +411,8 @@ const TradingJournal = () => {
                 <button
                     onClick={() => setActiveSubTab('totalStats')}
                     className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors ${activeSubTab === 'totalStats'
-                            ? 'bg-slate-800 text-amber-400 border-t border-x border-slate-700'
-                            : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/30'
+                        ? 'bg-slate-800 text-amber-400 border-t border-x border-slate-700'
+                        : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/30'
                         }`}
                 >
                     📈 Total Stats
@@ -420,8 +420,8 @@ const TradingJournal = () => {
                 <button
                     onClick={() => setActiveSubTab('setupStats')}
                     className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors ${activeSubTab === 'setupStats'
-                            ? 'bg-slate-800 text-amber-400 border-t border-x border-slate-700'
-                            : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/30'
+                        ? 'bg-slate-800 text-amber-400 border-t border-x border-slate-700'
+                        : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/30'
                         }`}
                 >
                     🎯 By Setup
@@ -631,8 +631,8 @@ const TradingJournal = () => {
                                         setFilterCriteria([]); // Reset criteria when switching setup
                                     }}
                                     className={`w-full text-left px-4 py-3 rounded-lg border transition-all ${filterSetup === s.id
-                                            ? `bg-slate-800 border-${getSetupColor(s.id).split(' ')[2].replace('border-', '')} shadow-lg ring-1 ring-white/10`
-                                            : 'bg-slate-800/30 border-transparent hover:bg-slate-800/50 text-slate-400'
+                                        ? `bg-slate-800 border-${getSetupColor(s.id).split(' ')[2].replace('border-', '')} shadow-lg ring-1 ring-white/10`
+                                        : 'bg-slate-800/30 border-transparent hover:bg-slate-800/50 text-slate-400'
                                         }`}
                                 >
                                     <div className="font-bold text-slate-200">{s.name}</div>
@@ -662,8 +662,8 @@ const TradingJournal = () => {
                                                             isActive ? prev.filter(x => x !== c) : [...prev, c]
                                                         )}
                                                         className={`px-3 py-1.5 text-xs rounded-md border transition-all ${isActive
-                                                                ? 'bg-amber-500/20 text-amber-400 border-amber-500/50 shadow shadow-amber-900/20'
-                                                                : 'bg-slate-700/50 text-slate-400 border-slate-600 hover:bg-slate-700 hover:border-slate-500'
+                                                            ? 'bg-amber-500/20 text-amber-400 border-amber-500/50 shadow shadow-amber-900/20'
+                                                            : 'bg-slate-700/50 text-slate-400 border-slate-600 hover:bg-slate-700 hover:border-slate-500'
                                                             }`}
                                                     >
                                                         {isActive ? '✓ ' : ''}{c}
@@ -1005,12 +1005,23 @@ const TradingJournal = () => {
                 <div
                     className="fixed inset-0 bg-black/95 z-[60] flex items-center justify-center p-4 backdrop-blur-sm"
                     onClick={() => setImageModal(null)}
+                    onWheel={(e) => {
+                        e.stopPropagation();
+                        // Adjust zoom sensitivity as needed. 
+                        // DeltaY is usually 100 or -100 per tick. -0.001 gives a smooth zoom control.
+                        const delta = -e.deltaY * 0.001;
+                        setImageModal(prev => {
+                            if (!prev) return null;
+                            const newZoom = Math.min(Math.max(0.5, prev.zoom + delta), 5);
+                            return { ...prev, zoom: newZoom };
+                        });
+                    }}
                 >
-                    <div className="relative w-full h-full flex items-center justify-center" onClick={e => e.stopPropagation()}>
+                    <div className="relative w-full h-full flex items-center justify-center overflow-hidden" onClick={e => e.stopPropagation()}>
                         <img
                             src={imageModal.src}
                             alt="Full size"
-                            style={{ transform: `scale(${imageModal.zoom})`, transition: 'transform 0.2s' }}
+                            style={{ transform: `scale(${imageModal.zoom})`, transition: 'transform 0.1s ease-out' }}
                             className="max-w-[95%] max-h-[90vh] object-contain shadow-2xl"
                         />
                         <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center space-x-4 bg-slate-900/90 px-6 py-3 rounded-full border border-slate-700 shadow-xl">
