@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 
 // ============= Types =============
@@ -149,22 +149,32 @@ const TradingJournal = () => {
     }, []);
 
     // Filtered entries helper (Memoized)
-    const filteredEntries = useCallback(() => {
+    const filteredEntries = useMemo(() => {
         let filtered = entries;
+
+        // 1. Filter by Setup
         if (filterSetup !== 'all') {
             filtered = filtered.filter(e => e.setupId === filterSetup);
         }
-        if (filterCriteria.length > 0) {
-            filtered = filtered.filter(e =>
-                filterCriteria.every(c =>
-                    e.criteriaUsed?.some(ec => ec.trim() === c.trim())
-                )
-            );
-        }
-        return filtered;
-    }, [entries, filterSetup, filterCriteria])();
 
-    const currentStats = calculateStats(filteredEntries);
+        // 2. Filter by Criteria
+        if (filterCriteria.length > 0) {
+            console.log('Filtering by criteria:', filterCriteria);
+            filtered = filtered.filter(e => {
+                const hasAll = filterCriteria.every(c =>
+                    e.criteriaUsed?.some(ec => ec.trim().toLowerCase() === c.trim().toLowerCase())
+                );
+                // Debug individual entry check
+                // if (!hasAll) console.log(`Entry ${e.id} excluded. Has: ${e.criteriaUsed}`);
+                return hasAll;
+            });
+        }
+
+        console.log(`Filtered count: ${filtered.length} (Setup: ${filterSetup}, Criteria: ${filterCriteria.length})`);
+        return filtered;
+    }, [entries, filterSetup, filterCriteria]);
+
+    const currentStats = useMemo(() => calculateStats(filteredEntries), [filteredEntries, calculateStats]);
 
     // ============= Handlers =============
     const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
