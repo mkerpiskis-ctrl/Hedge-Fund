@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
 
 // ============= Types =============
 interface SetupCategory {
@@ -175,6 +176,35 @@ const TradingJournal = () => {
     }, [entries, filterSetup, filterCriteria]);
 
     const currentStats = useMemo(() => calculateStats(filteredEntries), [filteredEntries, calculateStats]);
+
+    // Analytics Data
+    const equityCurveData = useMemo(() => {
+        let cumulative = 0;
+        return filteredEntries
+            .sort((a, b) => new Date(a.date + 'T' + a.time).getTime() - new Date(b.date + 'T' + b.time).getTime())
+            .map(e => {
+                cumulative += e.pnl;
+                return {
+                    date: e.date,
+                    equity: cumulative,
+                    pnl: e.pnl
+                };
+            });
+    }, [filteredEntries]);
+
+    const timeOfDayData = useMemo(() => {
+        const hours: Record<string, { hour: string, pnl: number, wins: number, losses: number, total: number }> = {};
+        filteredEntries.forEach(e => {
+            const hour = e.time.split(':')[0] + ':00';
+            if (!hours[hour]) hours[hour] = { hour, pnl: 0, wins: 0, losses: 0, total: 0 };
+            hours[hour].pnl += e.pnl;
+            hours[hour].total += 1;
+            if (e.result === 'WIN') hours[hour].wins += 1;
+            else hours[hour].losses += 1;
+        });
+        return Object.values(hours).sort((a, b) => a.hour.localeCompare(b.hour));
+    }, [filteredEntries]);
+
 
     // ============= Handlers =============
     const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -664,7 +694,6 @@ const TradingJournal = () => {
                                 </div>
                             ) : (
                                 <>
-                                    {/* Criteria Filter for Setup */}
                                     <div className="bg-slate-800/30 p-4 rounded-lg border border-slate-700">
                                         <div className="text-xs text-slate-500 uppercase mb-2">Filter by Criteria</div>
                                         <div className="flex flex-wrap gap-2">
@@ -695,31 +724,91 @@ const TradingJournal = () => {
                                         </div>
                                     </div>
 
-                                    {/* Setup Stats Grid */}
-                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                        <StatCard title="Setup Win Rate" value={`${currentStats.winRate.toFixed(1)}%`} type={currentStats.winRate >= 50 ? 'win' : 'loss'} />
-                                        <StatCard title="Setup P&L" value={`$${currentStats.totalPnl.toLocaleString()}`} type={currentStats.totalPnl >= 0 ? 'win' : 'loss'} />
-                                        <StatCard title="Avg R" value={`${currentStats.avgR.toFixed(2)} R`} type={currentStats.avgR > 0 ? 'win' : 'loss'} />
-                                        <StatCard title="Profit Factor" value={currentStats.profitFactor.toFixed(2)} />
-                                    </div>
+                                    {filterCriteria.length === 0 ? (
+                                        <div className="flex flex-col items-center justify-center p-12 text-slate-500 bg-slate-800/20 rounded-lg border border-slate-700 border-dashed">
+                                            <div className="text-4xl mb-3">👈</div>
+                                            <p className="font-medium">Select criteria to analyze performance</p>
+                                            <p className="text-xs text-slate-600 mt-1 max-w-xs text-center">
+                                                Select the variables you used (e.g., 'Trend Direction') to see how this setup performs under specific conditions.
+                                            </p>
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-6 animate-fade-in">
+                                            {/* Setup Stats Grid */}
+                                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                                <StatCard title="Setup Win Rate" value={`${currentStats.winRate.toFixed(1)}%`} type={currentStats.winRate >= 50 ? 'win' : 'loss'} />
+                                                <StatCard title="Setup P&L" value={`$${currentStats.totalPnl.toLocaleString()}`} type={currentStats.totalPnl >= 0 ? 'win' : 'loss'} />
+                                                <StatCard title="Avg R" value={`${currentStats.avgR.toFixed(2)} R`} type={currentStats.avgR > 0 ? 'win' : 'loss'} />
+                                                <StatCard title="Profit Factor" value={currentStats.profitFactor.toFixed(2)} />
+                                            </div>
 
-                                    {/* Setup Performance Graph Placeholder or Additional Insights */}
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <div className="bg-slate-800/30 p-4 rounded-lg border border-slate-700">
-                                            <h4 className="text-xs font-bold text-slate-500 uppercase mb-3">Setup Expectancy</h4>
-                                            <div className="text-3xl font-light text-white">
-                                                {((currentStats.winRate / 100 * currentStats.avgWinR) - ((1 - currentStats.winRate / 100) * Math.abs(currentStats.avgLossR))).toFixed(2)}R
+                                            {/* Setup Performance Graph Placeholder or Additional Insights */}
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                <div className="bg-slate-800/30 p-4 rounded-lg border border-slate-700">
+                                                    <h4 className="text-xs font-bold text-slate-500 uppercase mb-3">Setup Expectancy</h4>
+                                                    <div className="text-3xl font-light text-white">
+                                                        {((currentStats.winRate / 100 * currentStats.avgWinR) - ((1 - currentStats.winRate / 100) * Math.abs(currentStats.avgLossR))).toFixed(2)}R
+                                                    </div>
+                                                    <div className="text-[10px] text-slate-500 mt-1">Expected return per trade</div>
+                                                </div>
+                                                <div className="bg-slate-800/30 p-4 rounded-lg border border-slate-700">
+                                                    <h4 className="text-xs font-bold text-slate-500 uppercase mb-3">Frequency</h4>
+                                                    <div className="text-3xl font-light text-white">
+                                                        {((currentStats.totalTrades / (entries.length || 1)) * 100).toFixed(1)}%
+                                                    </div>
+                                                    <div className="text-[10px] text-slate-500 mt-1">of total trades ({currentStats.totalTrades})</div>
+                                                </div>
                                             </div>
-                                            <div className="text-[10px] text-slate-500 mt-1">Expected return per trade</div>
-                                        </div>
-                                        <div className="bg-slate-800/30 p-4 rounded-lg border border-slate-700">
-                                            <h4 className="text-xs font-bold text-slate-500 uppercase mb-3">Frequency</h4>
-                                            <div className="text-3xl font-light text-white">
-                                                {((currentStats.totalTrades / (entries.length || 1)) * 100).toFixed(1)}%
+
+                                            {/* Advanced Analytics Charts */}
+                                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-4 border-t border-slate-800">
+                                                {/* Equity Curve */}
+                                                <div className="bg-slate-800/30 p-4 rounded-lg border border-slate-700 h-80">
+                                                    <h4 className="text-xs font-bold text-slate-500 uppercase mb-4">Equity Curve (P{'&'}L)</h4>
+                                                    <ResponsiveContainer width="100%" height="100%">
+                                                        <LineChart data={equityCurveData}>
+                                                            <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.5} />
+                                                            <XAxis dataKey="date" stroke="#94a3b8" fontSize={10} tickFormatter={(val) => val.slice(5)} />
+                                                            <YAxis stroke="#94a3b8" fontSize={10} />
+                                                            <Tooltip
+                                                                contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#f8fafc' }}
+                                                                itemStyle={{ color: '#f8fafc' }}
+                                                                formatter={(value: number) => [`$${(value || 0).toFixed(2)}`, 'Equity']}
+                                                            />
+                                                            <Line
+                                                                type="monotone"
+                                                                dataKey="equity"
+                                                                stroke="#fbbf24"
+                                                                strokeWidth={2}
+                                                                dot={{ r: 3, fill: '#fbbf24' }}
+                                                            />
+                                                        </LineChart>
+                                                    </ResponsiveContainer>
+                                                </div>
+
+                                                {/* Time of Day Analysis */}
+                                                <div className="bg-slate-800/30 p-4 rounded-lg border border-slate-700 h-80">
+                                                    <h4 className="text-xs font-bold text-slate-500 uppercase mb-4">Hourly Performance (Win/Loss)</h4>
+                                                    <ResponsiveContainer width="100%" height="100%">
+                                                        <BarChart data={timeOfDayData}>
+                                                            <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.5} />
+                                                            <XAxis dataKey="hour" stroke="#94a3b8" fontSize={10} />
+                                                            <YAxis stroke="#94a3b8" fontSize={10} />
+                                                            <Tooltip
+                                                                cursor={{ fill: '#334155', opacity: 0.2 }}
+                                                                contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#f8fafc' }}
+                                                            />
+                                                            <Bar dataKey="wins" name="Wins" stackId="a" fill="#10b981" />
+                                                            <Bar dataKey="losses" name="Losses/BE" stackId="a" fill="#f43f5e" />
+                                                        </BarChart>
+                                                    </ResponsiveContainer>
+                                                    <div className="text-[10px] text-slate-500 mt-2 text-center italic">
+                                                        *Bars show total volume per hour. Green portion represents wins.
+                                                    </div>
+                                                </div>
                                             </div>
-                                            <div className="text-[10px] text-slate-500 mt-1">of total trades</div>
                                         </div>
-                                    </div>
+                                    )}
                                 </>
                             )}
                         </div>
