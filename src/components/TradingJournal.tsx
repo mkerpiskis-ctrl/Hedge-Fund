@@ -13,6 +13,7 @@ interface JournalEntry {
     date: string;
     time: string;
     symbol: string;
+    tickValue: number; // Value per 1 point move (e.g. 5 for MES)
     setupId: string;
     criteriaUsed: string[];
     level: number;
@@ -53,6 +54,22 @@ const CRITERIA_LIBRARY = [
     'Oscillator Divergence',
 ];
 
+// Futures Config
+const FUTURES_SYMBOLS: Record<string, number> = {
+    'MES': 5,
+    'ES': 50,
+    'MNQ': 2,
+    'NQ': 20,
+    'MYM': 0.5,
+    'YM': 5,
+    'M2K': 5,
+    'RTY': 50,
+    'CL': 1000,
+    'MCL': 100,
+    'GC': 100,
+    'MGC': 10,
+};
+
 const TradingJournal = () => {
     // ============= State =============
     const [entries, setEntries] = useState<JournalEntry[]>(() => {
@@ -65,12 +82,19 @@ const TradingJournal = () => {
         return saved ? JSON.parse(saved) : DEFAULT_SETUPS;
     });
 
+    const [activeSubTab, setActiveSubTab] = useState<'history' | 'totalStats' | 'setupStats'>('history');
+
+    // Filters
     const [filterSetup, setFilterSetup] = useState<string>('all');
     const [filterCriteria, setFilterCriteria] = useState<string[]>([]);
+
+    // UI State
     const [showNewEntry, setShowNewEntry] = useState(false);
     const [showSetupManager, setShowSetupManager] = useState(false);
     const [editingEntry, setEditingEntry] = useState<JournalEntry | null>(null);
     const [imageModal, setImageModal] = useState<{ src: string; zoom: number } | null>(null);
+
+    // Setup Manager State
     const [newSetupName, setNewSetupName] = useState('');
     const [newCriteria, setNewCriteria] = useState('');
     const [selectedSetupForCriteria, setSelectedSetupForCriteria] = useState<string | null>(null);
@@ -79,7 +103,8 @@ const TradingJournal = () => {
     const [formData, setFormData] = useState({
         date: new Date().toISOString().split('T')[0],
         time: new Date().toTimeString().slice(0, 5),
-        symbol: '',
+        symbol: 'MES',
+        tickValue: '5',
         setupId: '',
         criteriaUsed: [] as string[],
         level: '',
@@ -104,32 +129,37 @@ const TradingJournal = () => {
     }, [setups]);
 
     // ============= Calculations =============
-    const calculateStats = useCallback(() => {
-        let filteredEntries = entries;
-
-        if (filterSetup !== 'all') {
-            filteredEntries = filteredEntries.filter(e => e.setupId === filterSetup);
-        }
-
-        if (filterCriteria.length > 0) {
-            filteredEntries = filteredEntries.filter(e =>
-                filterCriteria.every(c => e.criteriaUsed.includes(c))
-            );
-        }
-
-        const totalTrades = filteredEntries.length;
-        const wins = filteredEntries.filter(e => e.result === 'WIN').length;
-        const losses = filteredEntries.filter(e => e.result === 'LOSS').length;
+    const calculateStats = useCallback((entriesToCalc: JournalEntry[]) => {
+        const totalTrades = entriesToCalc.length;
+        const wins = entriesToCalc.filter(e => e.result === 'WIN').length;
+        const losses = entriesToCalc.filter(e => e.result === 'LOSS').length;
         const winRate = totalTrades > 0 ? (wins / totalTrades) * 100 : 0;
-        const totalPnl = filteredEntries.reduce((sum, e) => sum + e.pnl, 0);
-        const avgR = totalTrades > 0 ? filteredEntries.reduce((sum, e) => sum + e.rMultiple, 0) / totalTrades : 0;
-        const avgWinR = wins > 0 ? filteredEntries.filter(e => e.result === 'WIN').reduce((sum, e) => sum + e.rMultiple, 0) / wins : 0;
-        const avgLossR = losses > 0 ? filteredEntries.filter(e => e.result === 'LOSS').reduce((sum, e) => sum + Math.abs(e.rMultiple), 0) / losses : 0;
+        const totalPnl = entriesToCalc.reduce((sum, e) => sum + e.pnl, 0);
+        const totalPnlPercent = entriesToCalc.reduce((sum, e) => sum + e.pnlPercent, 0); // Not strictly accurate summation but indicative
+        const avgR = totalTrades > 0 ? entriesToCalc.reduce((sum, e) => sum + e.rMultiple, 0) / totalTrades : 0;
+        const avgWinR = wins > 0 ? entriesToCalc.filter(e => e.result === 'WIN').reduce((sum, e) => sum + e.rMultiple, 0) / wins : 0;
+        const avgLossR = losses > 0 ? entriesToCalc.filter(e => e.result === 'LOSS').reduce((sum, e) => sum + Math.abs(e.rMultiple), 0) / losses : 0;
+        const profitFactor = Math.abs(entriesToCalc.filter(e => e.result === 'LOSS').reduce((sum, e) => sum + e.pnl, 0)) > 0
+            ? entriesToCalc.filter(e => e.result === 'WIN').reduce((sum, e) => sum + e.pnl, 0) / Math.abs(entriesToCalc.filter(e => e.result === 'LOSS').reduce((sum, e) => sum + e.pnl, 0))
+            : (wins > 0 ? 999 : 0);
 
-        return { totalTrades, wins, losses, winRate, totalPnl, avgR, avgWinR, avgLossR, filteredEntries };
-    }, [entries, filterSetup, filterCriteria]);
+        return { totalTrades, wins, losses, winRate, totalPnl, totalPnlPercent, avgR, avgWinR, avgLossR, profitFactor };
+    }, []);
 
-    const stats = calculateStats();
+    // Filtered entries for History tab
+    const getFilteredEntries = () => {
+        let filtered = entries;
+        if (filterSetup !== 'all') {
+            filtered = filtered.filter(e => e.setupId === filterSetup);
+        }
+        if (filterCriteria.length > 0) {
+            filtered = filtered.filter(e => filterCriteria.every(c => e.criteriaUsed.includes(c)));
+        }
+        return filtered;
+    };
+
+    const filteredEntries = getFilteredEntries();
+    const currentStats = calculateStats(filteredEntries);
 
     // ============= Handlers =============
     const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -156,16 +186,45 @@ const TradingJournal = () => {
         }));
     };
 
+    const handleSymbolChange = (val: string) => {
+        const upperVal = val.toUpperCase();
+        const tickVal = FUTURES_SYMBOLS[upperVal];
+        setFormData(prev => ({
+            ...prev,
+            symbol: upperVal,
+            tickValue: tickVal ? tickVal.toString() : prev.tickValue
+        }));
+    };
+
     const handleSubmit = () => {
         const entry = parseFloat(formData.entry) || 0;
         const exit = parseFloat(formData.exit) || 0;
         const stopLoss = parseFloat(formData.stopLoss) || 0;
         const quantity = parseFloat(formData.quantity) || 1;
+        const tickValue = parseFloat(formData.tickValue) || 1;
 
-        const pnl = (exit - entry) * quantity;
-        const pnlPercent = entry > 0 ? ((exit - entry) / entry) * 100 : 0;
-        const risk = Math.abs(entry - stopLoss);
-        const rMultiple = risk > 0 ? (exit - entry) / risk : 0;
+        // P&L Calculation for Futures: (Exit - Entry) * Quantity * TickValue (assuming Entry/Exit are raw prices)
+        // For Long: (Exit - Entry)
+        // For Short: (Entry - Exit) - Need to detect direction.
+        // Usually journal entry implies direction by context. 
+        // Let's assume Long if TP > Entry, Short if TP < Entry or based on SL.
+        // Improved logic: compare Entry and StopLoss to detect direction.
+
+        let direction = 1; // 1 for Long, -1 for Short
+        if (stopLoss !== 0) {
+            direction = stopLoss < entry ? 1 : -1;
+        } else if (parseFloat(formData.takeProfit) !== 0) {
+            direction = parseFloat(formData.takeProfit) > entry ? 1 : -1;
+        }
+
+        const rawPriceDiff = (exit - entry) * direction;
+        const pnl = rawPriceDiff * quantity * tickValue;
+
+        // PnL Percent is tricky for futures (margin based), so we use price % change
+        const pnlPercent = entry > 0 ? (rawPriceDiff / entry) * 100 : 0;
+
+        const riskPriceDiff = Math.abs(entry - stopLoss);
+        const rMultiple = (riskPriceDiff > 0 && stopLoss !== 0) ? rawPriceDiff / riskPriceDiff : 0;
 
         let result: 'WIN' | 'LOSS' | 'BREAKEVEN' = 'BREAKEVEN';
         if (pnl > 0) result = 'WIN';
@@ -176,6 +235,7 @@ const TradingJournal = () => {
             date: formData.date,
             time: formData.time,
             symbol: formData.symbol.toUpperCase(),
+            tickValue,
             setupId: formData.setupId,
             criteriaUsed: formData.criteriaUsed,
             level: parseFloat(formData.level) || 0,
@@ -205,7 +265,8 @@ const TradingJournal = () => {
         setFormData({
             date: new Date().toISOString().split('T')[0],
             time: new Date().toTimeString().slice(0, 5),
-            symbol: '',
+            symbol: 'MES',
+            tickValue: '5',
             setupId: '',
             criteriaUsed: [],
             level: '',
@@ -226,6 +287,7 @@ const TradingJournal = () => {
             date: entry.date,
             time: entry.time,
             symbol: entry.symbol,
+            tickValue: entry.tickValue?.toString() || '1',
             setupId: entry.setupId,
             criteriaUsed: entry.criteriaUsed,
             level: entry.level.toString(),
@@ -296,6 +358,17 @@ const TradingJournal = () => {
         return colors[setup?.color || 'blue'] || colors.blue;
     };
 
+    // Helper to render stat card
+    const StatCard = ({ title, value, type = 'neutral', subtext = '' }: { title: string, value: string, type?: 'win' | 'loss' | 'neutral', subtext?: string }) => (
+        <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700 text-center">
+            <div className={`text-2xl font-bold ${type === 'win' ? 'text-emerald-400' : type === 'loss' ? 'text-rose-400' : 'text-white'}`}>
+                {value}
+            </div>
+            <div className="text-[10px] text-slate-500 uppercase tracking-wider mt-1">{title}</div>
+            {subtext && <div className="text-[10px] text-slate-600 mt-1">{subtext}</div>}
+        </div>
+    );
+
     // ============= Render =============
     return (
         <div className="space-y-6">
@@ -305,7 +378,7 @@ const TradingJournal = () => {
                     <span className="text-3xl">📊</span>
                     <div>
                         <h2 className="text-2xl font-bold text-white">Trading Journal</h2>
-                        <p className="text-xs text-slate-500">Track, analyze, and improve your setups</p>
+                        <p className="text-xs text-slate-500">Track executions, analyze setups, master your edge</p>
                     </div>
                 </div>
                 <div className="flex items-center space-x-3">
@@ -313,406 +386,614 @@ const TradingJournal = () => {
                         onClick={() => setShowSetupManager(!showSetupManager)}
                         className="px-3 py-2 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg border border-slate-600"
                     >
-                        ⚙️ Manage Setups
+                        ⚙️ Setups
                     </button>
                     <button
                         onClick={() => setShowNewEntry(true)}
-                        className="px-4 py-2 text-sm bg-amber-500 hover:bg-amber-400 text-black font-bold rounded-lg"
+                        className="px-4 py-2 text-sm bg-amber-500 hover:bg-amber-400 text-black font-bold rounded-lg shadow-lg shadow-amber-500/20"
                     >
                         + New Entry
                     </button>
                 </div>
             </div>
 
-            {/* Filters */}
-            <div className="flex flex-wrap items-center gap-4 bg-slate-800/30 p-4 rounded-lg border border-slate-700">
-                <div className="flex items-center space-x-2">
-                    <span className="text-xs text-slate-500">Setup:</span>
-                    <select
-                        value={filterSetup}
-                        onChange={(e) => setFilterSetup(e.target.value)}
-                        className="bg-slate-700 text-slate-200 text-sm px-3 py-1.5 rounded border border-slate-600"
-                    >
-                        <option value="all">All Setups</option>
-                        {setups.map(s => (
-                            <option key={s.id} value={s.id}>{s.name}</option>
-                        ))}
-                    </select>
-                </div>
+            {/* Main Tabs */}
+            <div className="flex space-x-1 border-b border-slate-700/50">
+                <button
+                    onClick={() => setActiveSubTab('history')}
+                    className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors ${activeSubTab === 'history'
+                            ? 'bg-slate-800 text-amber-400 border-t border-x border-slate-700'
+                            : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/30'
+                        }`}
+                >
+                    📜 History
+                </button>
+                <button
+                    onClick={() => setActiveSubTab('totalStats')}
+                    className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors ${activeSubTab === 'totalStats'
+                            ? 'bg-slate-800 text-amber-400 border-t border-x border-slate-700'
+                            : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/30'
+                        }`}
+                >
+                    📈 Total Stats
+                </button>
+                <button
+                    onClick={() => setActiveSubTab('setupStats')}
+                    className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors ${activeSubTab === 'setupStats'
+                            ? 'bg-slate-800 text-amber-400 border-t border-x border-slate-700'
+                            : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/30'
+                        }`}
+                >
+                    🎯 By Setup
+                </button>
+            </div>
 
-                <div className="flex items-center space-x-2">
-                    <span className="text-xs text-slate-500">Criteria:</span>
-                    <div className="flex flex-wrap gap-1">
-                        {filterSetup !== 'all' && getSetupById(filterSetup)?.criteria.map(c => (
-                            <button
-                                key={c}
-                                onClick={() => setFilterCriteria(prev =>
-                                    prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c]
-                                )}
-                                className={`px-2 py-0.5 text-[10px] rounded border ${filterCriteria.includes(c)
-                                    ? 'bg-amber-500/20 text-amber-400 border-amber-500/50'
-                                    : 'bg-slate-700 text-slate-400 border-slate-600'
-                                    }`}
+            {/* TAB CONTENT: HISTORY */}
+            {activeSubTab === 'history' && (
+                <div className="space-y-4 animate-fade-in">
+                    {/* Filters */}
+                    <div className="flex flex-wrap items-center gap-4 bg-slate-800/30 p-4 rounded-lg border border-slate-700">
+                        <div className="flex items-center space-x-2">
+                            <span className="text-xs text-slate-500">Setup Filter:</span>
+                            <select
+                                value={filterSetup}
+                                onChange={(e) => setFilterSetup(e.target.value)}
+                                className="bg-slate-700 text-slate-200 text-sm px-3 py-1.5 rounded border border-slate-600 outline-none focus:border-amber-500/50"
                             >
-                                {c}
-                            </button>
-                        ))}
-                        {filterSetup === 'all' && (
-                            <span className="text-xs text-slate-500 italic">Select a setup to filter by criteria</span>
+                                <option value="all">All Setups</option>
+                                {setups.map(s => (
+                                    <option key={s.id} value={s.id}>{s.name}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        <div className="flex items-center space-x-2">
+                            <span className="text-xs text-slate-500">Criteria Filter:</span>
+                            <div className="flex flex-wrap gap-1">
+                                {filterSetup !== 'all' ? getSetupById(filterSetup)?.criteria.map(c => (
+                                    <button
+                                        key={c}
+                                        onClick={() => setFilterCriteria(prev =>
+                                            prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c]
+                                        )}
+                                        className={`px-2 py-0.5 text-[10px] rounded border transition-colors ${filterCriteria.includes(c)
+                                            ? 'bg-amber-500/20 text-amber-400 border-amber-500/50'
+                                            : 'bg-slate-700 text-slate-400 border-slate-600 hover:border-slate-500'
+                                            }`}
+                                    >
+                                        {c}
+                                    </button>
+                                )) : (
+                                    <span className="text-xs text-slate-600 italic">Select a setup to filter by criteria</span>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Entries List */}
+                    <div className="bg-slate-800/30 rounded-lg border border-slate-700 overflow-hidden">
+                        {filteredEntries.length === 0 ? (
+                            <div className="p-12 text-center text-slate-500">
+                                <div className="text-5xl mb-4 opacity-30">📓</div>
+                                <h3 className="text-lg font-medium text-slate-400">No entries found</h3>
+                                <p className="text-sm">Add a new trade or adjust filters.</p>
+                            </div>
+                        ) : (
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm">
+                                    <thead className="text-slate-500 uppercase text-xs bg-slate-800/80">
+                                        <tr>
+                                            <th className="text-left p-3 font-medium">Date</th>
+                                            <th className="text-left p-3 font-medium">Symbol</th>
+                                            <th className="text-left p-3 font-medium">Setup</th>
+                                            <th className="text-right p-3 font-medium">Entry</th>
+                                            <th className="text-right p-3 font-medium">Exits</th>
+                                            <th className="text-right p-3 font-medium">R</th>
+                                            <th className="text-right p-3 font-medium">P&L</th>
+                                            <th className="text-center p-3 font-medium">Img</th>
+                                            <th className="text-center p-3 font-medium">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="text-slate-300 divide-y divide-slate-700/50">
+                                        {filteredEntries.map(entry => (
+                                            <tr key={entry.id} className="hover:bg-slate-700/20 transition-colors">
+                                                <td className="p-3">
+                                                    <div className="font-mono">{entry.date}</div>
+                                                    <div className="text-[10px] text-slate-500">{entry.time}</div>
+                                                </td>
+                                                <td className="p-3">
+                                                    <div className="font-bold text-slate-200">{entry.symbol}</div>
+                                                </td>
+                                                <td className="p-3">
+                                                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${getSetupColor(entry.setupId)}`}>
+                                                        {getSetupById(entry.setupId)?.name || 'Unknown'}
+                                                    </span>
+                                                    {entry.criteriaUsed.length > 0 && (
+                                                        <div className="flex flex-wrap gap-0.5 mt-1">
+                                                            {entry.criteriaUsed.slice(0, 2).map(c => (
+                                                                <span key={c} className="text-[9px] px-1 bg-slate-800 rounded text-slate-500">{c}</span>
+                                                            ))}
+                                                            {entry.criteriaUsed.length > 2 && (
+                                                                <span className="text-[9px] px-1 bg-slate-800 rounded text-slate-500">+{entry.criteriaUsed.length - 2}</span>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                </td>
+                                                <td className="p-3 text-right font-mono text-xs">${entry.entry.toFixed(2)}</td>
+                                                <td className="p-3 text-right font-mono text-xs">${entry.exit.toFixed(2)}</td>
+                                                <td className={`p-3 text-right font-bold font-mono ${entry.rMultiple >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                    {entry.rMultiple >= 0 ? '+' : ''}{entry.rMultiple.toFixed(2)}R
+                                                </td>
+                                                <td className={`p-3 text-right font-bold font-mono ${entry.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                    {entry.pnl >= 0 ? '+' : ''}${entry.pnl.toLocaleString()}
+                                                </td>
+                                                <td className="p-3 text-center">
+                                                    {entry.images.length > 0 ? (
+                                                        <button
+                                                            onClick={() => setImageModal({ src: entry.images[0], zoom: 1 })}
+                                                            className="text-amber-400 hover:text-amber-300 transition-colors"
+                                                        >
+                                                            🖼️
+                                                        </button>
+                                                    ) : <span className="text-slate-700">-</span>}
+                                                </td>
+                                                <td className="p-3 text-center">
+                                                    <div className="flex items-center justify-center space-x-2">
+                                                        <button
+                                                            onClick={() => editEntry(entry)}
+                                                            className="text-slate-500 hover:text-amber-400 transition-colors"
+                                                            title="Edit"
+                                                        >
+                                                            ✏️
+                                                        </button>
+                                                        <button
+                                                            onClick={() => deleteEntry(entry.id)}
+                                                            className="text-slate-500 hover:text-rose-400 transition-colors"
+                                                            title="Delete"
+                                                        >
+                                                            🗑️
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
                         )}
                     </div>
                 </div>
-            </div>
+            )}
 
-            {/* Statistics */}
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
-                <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700 text-center">
-                    <div className="text-2xl font-bold text-white">{stats.totalTrades}</div>
-                    <div className="text-[10px] text-slate-500 uppercase">Trades</div>
-                </div>
-                <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700 text-center">
-                    <div className="text-2xl font-bold text-emerald-400">{stats.wins}</div>
-                    <div className="text-[10px] text-slate-500 uppercase">Wins</div>
-                </div>
-                <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700 text-center">
-                    <div className="text-2xl font-bold text-rose-400">{stats.losses}</div>
-                    <div className="text-[10px] text-slate-500 uppercase">Losses</div>
-                </div>
-                <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700 text-center">
-                    <div className={`text-2xl font-bold ${stats.winRate >= 50 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {stats.winRate.toFixed(1)}%
+            {/* TAB CONTENT: TOTAL STATS */}
+            {activeSubTab === 'totalStats' && (
+                <div className="space-y-6 animate-fade-in">
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                        <StatCard title="Win Rate" value={`${currentStats.winRate.toFixed(1)}%`} type={currentStats.winRate >= 50 ? 'win' : 'loss'} />
+                        <StatCard title="Profit Factor" value={currentStats.profitFactor.toFixed(2)} type={currentStats.profitFactor >= 1.5 ? 'win' : 'neutral'} />
+                        <StatCard title="Total P&L" value={`$${currentStats.totalPnl.toLocaleString()}`} type={currentStats.totalPnl >= 0 ? 'win' : 'loss'} />
+                        <StatCard title="Avg R Check" value={`${currentStats.avgR.toFixed(2)}R`} type={currentStats.avgR > 0 ? 'win' : 'loss'} />
                     </div>
-                    <div className="text-[10px] text-slate-500 uppercase">Win Rate</div>
-                </div>
-                <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700 text-center">
-                    <div className={`text-2xl font-bold ${stats.avgR >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {stats.avgR >= 0 ? '+' : ''}{stats.avgR.toFixed(2)}R
+
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                        <StatCard title="Total Trades" value={currentStats.totalTrades.toString()} />
+                        <StatCard title="Wins" value={currentStats.wins.toString()} type="win" />
+                        <StatCard title="Losses" value={currentStats.losses.toString()} type="loss" />
+                        <StatCard title="Risk/Reward Ratio" value={`1 : ${(currentStats.avgWinR / (Math.abs(currentStats.avgLossR) || 1)).toFixed(2)}`} />
                     </div>
-                    <div className="text-[10px] text-slate-500 uppercase">Avg R</div>
-                </div>
-                <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700 text-center">
-                    <div className="text-2xl font-bold text-emerald-400">+{stats.avgWinR.toFixed(2)}R</div>
-                    <div className="text-[10px] text-slate-500 uppercase">Avg Win</div>
-                </div>
-                <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700 text-center">
-                    <div className="text-2xl font-bold text-rose-400">-{stats.avgLossR.toFixed(2)}R</div>
-                    <div className="text-[10px] text-slate-500 uppercase">Avg Loss</div>
-                </div>
-                <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700 text-center">
-                    <div className={`text-2xl font-bold ${stats.totalPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        ${stats.totalPnl.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+
+                    <div className="bg-slate-800/30 p-6 rounded-lg border border-slate-700">
+                        <h3 className="text-lg font-bold text-white mb-4">Performance Insights</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                            <div>
+                                <h4 className="text-xs uppercase text-slate-500 mb-2">P&L Distribution</h4>
+                                <div className="h-4 bg-slate-700/50 rounded-full overflow-hidden flex">
+                                    <div style={{ width: `${currentStats.winRate}%` }} className="bg-emerald-500/50 h-full"></div>
+                                    <div style={{ width: `${100 - currentStats.winRate}%` }} className="bg-rose-500/50 h-full"></div>
+                                </div>
+                                <div className="flex justify-between text-xs text-slate-400 mt-1">
+                                    <span>{currentStats.wins} Wins</span>
+                                    <span>{currentStats.losses} Losses</span>
+                                </div>
+                            </div>
+
+                            <div>
+                                <h4 className="text-xs uppercase text-slate-500 mb-2">Averages</h4>
+                                <div className="flex items-center space-x-4">
+                                    <div className="flex-1">
+                                        <div className="text-3xl font-light text-emerald-400">+{currentStats.avgWinR.toFixed(2)}R</div>
+                                        <div className="text-[10px] text-slate-500 uppercase">Avg Win</div>
+                                    </div>
+                                    <div className="w-px h-10 bg-slate-700"></div>
+                                    <div className="flex-1">
+                                        <div className="text-3xl font-light text-rose-400">-{Math.abs(currentStats.avgLossR).toFixed(2)}R</div>
+                                        <div className="text-[10px] text-slate-500 uppercase">Avg Loss</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
-                    <div className="text-[10px] text-slate-500 uppercase">Total P&L</div>
                 </div>
-            </div>
+            )}
+
+            {/* TAB CONTENT: BY SETUP */}
+            {activeSubTab === 'setupStats' && (
+                <div className="space-y-6 animate-fade-in">
+                    <div className="flex flex-col md:flex-row gap-6">
+                        {/* Sidebar: Select Setup */}
+                        <div className="w-full md:w-64 space-y-2">
+                            <h3 className="text-xs font-bold text-slate-500 uppercase mb-2">Select Setup</h3>
+                            {setups.map(s => (
+                                <button
+                                    key={s.id}
+                                    onClick={() => {
+                                        setFilterSetup(s.id);
+                                        setFilterCriteria([]); // Reset criteria when switching setup
+                                    }}
+                                    className={`w-full text-left px-4 py-3 rounded-lg border transition-all ${filterSetup === s.id
+                                            ? `bg-slate-800 border-${getSetupColor(s.id).split(' ')[2].replace('border-', '')} shadow-lg ring-1 ring-white/10`
+                                            : 'bg-slate-800/30 border-transparent hover:bg-slate-800/50 text-slate-400'
+                                        }`}
+                                >
+                                    <div className="font-bold text-slate-200">{s.name}</div>
+                                    <div className="text-[10px] text-slate-500 mt-1">{entries.filter(e => e.setupId === s.id).length} trades</div>
+                                </button>
+                            ))}
+                        </div>
+
+                        {/* Main Content: Stats for Selected Setup */}
+                        <div className="flex-1 space-y-6">
+                            {filterSetup === 'all' ? (
+                                <div className="h-full flex items-center justify-center text-slate-500 p-12 bg-slate-800/20 rounded-lg border border-slate-800 border-dashed">
+                                    Select a setup from the left to view detailed statistics
+                                </div>
+                            ) : (
+                                <>
+                                    {/* Criteria Filter for Setup */}
+                                    <div className="bg-slate-800/30 p-4 rounded-lg border border-slate-700">
+                                        <div className="text-xs text-slate-500 uppercase mb-2">Filter by Criteria</div>
+                                        <div className="flex flex-wrap gap-2">
+                                            {getSetupById(filterSetup)?.criteria.map(c => {
+                                                const isActive = filterCriteria.includes(c);
+                                                return (
+                                                    <button
+                                                        key={c}
+                                                        onClick={() => setFilterCriteria(prev =>
+                                                            isActive ? prev.filter(x => x !== c) : [...prev, c]
+                                                        )}
+                                                        className={`px-3 py-1.5 text-xs rounded-md border transition-all ${isActive
+                                                                ? 'bg-amber-500/20 text-amber-400 border-amber-500/50 shadow shadow-amber-900/20'
+                                                                : 'bg-slate-700/50 text-slate-400 border-slate-600 hover:bg-slate-700 hover:border-slate-500'
+                                                            }`}
+                                                    >
+                                                        {isActive ? '✓ ' : ''}{c}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                        <div className="mt-2 text-[10px] text-slate-500 text-right">
+                                            Showing {filteredEntries.length} matching trades
+                                        </div>
+                                    </div>
+
+                                    {/* Setup Stats Grid */}
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                        <StatCard title="Setup Win Rate" value={`${currentStats.winRate.toFixed(1)}%`} type={currentStats.winRate >= 50 ? 'win' : 'loss'} />
+                                        <StatCard title="Setup P&L" value={`$${currentStats.totalPnl.toLocaleString()}`} type={currentStats.totalPnl >= 0 ? 'win' : 'loss'} />
+                                        <StatCard title="Avg R" value={`${currentStats.avgR.toFixed(2)}R`} type={currentStats.avgR > 0 ? 'win' : 'loss'} />
+                                        <StatCard title="Profit Factor" value={currentStats.profitFactor.toFixed(2)} />
+                                    </div>
+
+                                    {/* Setup Performance Graph Placeholder or Additional Insights */}
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div className="bg-slate-800/30 p-4 rounded-lg border border-slate-700">
+                                            <h4 className="text-xs font-bold text-slate-500 uppercase mb-3">Setup Expectancy</h4>
+                                            <div className="text-3xl font-light text-white">
+                                                {((currentStats.winRate / 100 * currentStats.avgWinR) - ((1 - currentStats.winRate / 100) * Math.abs(currentStats.avgLossR))).toFixed(2)}R
+                                            </div>
+                                            <div className="text-[10px] text-slate-500 mt-1">Expected return per trade</div>
+                                        </div>
+                                        <div className="bg-slate-800/30 p-4 rounded-lg border border-slate-700">
+                                            <h4 className="text-xs font-bold text-slate-500 uppercase mb-3">Frequency</h4>
+                                            <div className="text-3xl font-light text-white">
+                                                {((currentStats.totalTrades / (entries.length || 1)) * 100).toFixed(1)}%
+                                            </div>
+                                            <div className="text-[10px] text-slate-500 mt-1">of total trades</div>
+                                        </div>
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Setup Manager */}
             {showSetupManager && (
-                <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700">
-                    <h3 className="text-lg font-bold text-white mb-4">📋 Setup Manager</h3>
+                <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+                    <div className="bg-slate-900 rounded-xl border border-slate-700 w-full max-w-2xl max-h-[85vh] overflow-y-auto">
+                        <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-800/50">
+                            <h3 className="text-lg font-bold text-white">⚙️ Setup Manager</h3>
+                            <button onClick={() => setShowSetupManager(false)} className="text-slate-400 hover:text-white">✕</button>
+                        </div>
 
-                    <div className="flex items-center space-x-2 mb-4">
-                        <input
-                            type="text"
-                            placeholder="New setup name..."
-                            value={newSetupName}
-                            onChange={(e) => setNewSetupName(e.target.value)}
-                            className="flex-1 bg-slate-700 text-slate-100 px-3 py-2 rounded border border-slate-600 text-sm"
-                            onKeyDown={(e) => e.key === 'Enter' && addSetup()}
-                        />
-                        <button
-                            onClick={addSetup}
-                            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm rounded"
-                        >
-                            + Add Setup
-                        </button>
-                    </div>
-
-                    <div className="space-y-3">
-                        {setups.map(setup => (
-                            <div key={setup.id} className="bg-slate-900/50 p-3 rounded-lg border border-slate-700">
-                                <div className="flex items-center justify-between mb-2">
-                                    <span className={`px-2 py-1 rounded text-sm font-bold border ${getSetupColor(setup.id)}`}>
-                                        {setup.name}
-                                    </span>
-                                    <button
-                                        onClick={() => deleteSetup(setup.id)}
-                                        className="text-slate-500 hover:text-rose-400 text-xs"
-                                    >
-                                        ✕ Remove
-                                    </button>
-                                </div>
-
-                                <div className="flex flex-wrap gap-1 mb-2">
-                                    {setup.criteria.map(c => (
-                                        <span key={c} className="px-2 py-0.5 bg-slate-700 text-slate-300 text-[10px] rounded flex items-center gap-1">
-                                            {c}
-                                            <button
-                                                onClick={() => removeCriteriaFromSetup(setup.id, c)}
-                                                className="text-slate-500 hover:text-rose-400"
-                                            >
-                                                ✕
-                                            </button>
-                                        </span>
-                                    ))}
-                                </div>
-
-                                {selectedSetupForCriteria === setup.id ? (
-                                    <div className="flex items-center space-x-2">
-                                        <select
-                                            value={newCriteria}
-                                            onChange={(e) => setNewCriteria(e.target.value)}
-                                            className="flex-1 bg-slate-700 text-slate-200 text-xs px-2 py-1 rounded border border-slate-600"
-                                        >
-                                            <option value="">Select criteria...</option>
-                                            {CRITERIA_LIBRARY.filter(c => !setup.criteria.includes(c)).map(c => (
-                                                <option key={c} value={c}>{c}</option>
-                                            ))}
-                                        </select>
-                                        <button
-                                            onClick={() => {
-                                                addCriteriaToSetup(setup.id, newCriteria);
-                                                setSelectedSetupForCriteria(null);
-                                            }}
-                                            className="px-2 py-1 bg-emerald-600 text-white text-xs rounded"
-                                        >
-                                            Add
-                                        </button>
-                                        <button
-                                            onClick={() => setSelectedSetupForCriteria(null)}
-                                            className="px-2 py-1 bg-slate-600 text-slate-300 text-xs rounded"
-                                        >
-                                            Cancel
-                                        </button>
-                                    </div>
-                                ) : (
-                                    <button
-                                        onClick={() => setSelectedSetupForCriteria(setup.id)}
-                                        className="text-xs text-slate-500 hover:text-slate-300"
-                                    >
-                                        + Add Criteria
-                                    </button>
-                                )}
+                        <div className="p-6 space-y-6">
+                            <div className="flex gap-2">
+                                <input
+                                    type="text"
+                                    placeholder="New setup name (e.g. 'Bear Flag')"
+                                    value={newSetupName}
+                                    onChange={(e) => setNewSetupName(e.target.value)}
+                                    className="flex-1 bg-slate-800 text-slate-100 px-4 py-2 rounded border border-slate-700 focus:border-amber-500 outline-none"
+                                />
+                                <button
+                                    onClick={addSetup}
+                                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded"
+                                >
+                                    Add Setup
+                                </button>
                             </div>
-                        ))}
+
+                            <div className="space-y-4">
+                                {setups.map(setup => (
+                                    <div key={setup.id} className="bg-slate-800/30 p-4 rounded-lg border border-slate-700">
+                                        <div className="flex items-center justify-between mb-3">
+                                            <span className={`px-2 py-1 rounded text-sm font-bold border ${getSetupColor(setup.id)}`}>
+                                                {setup.name}
+                                            </span>
+                                            <button onClick={() => deleteSetup(setup.id)} className="text-slate-500 hover:text-rose-400 text-xs uppercase font-bold">Delete</button>
+                                        </div>
+
+                                        <div className="space-y-2">
+                                            <div className="flex flex-wrap gap-2">
+                                                {setup.criteria.map(c => (
+                                                    <span key={c} className="px-2 py-1 bg-slate-700 text-slate-300 text-xs rounded flex items-center gap-1">
+                                                        {c}
+                                                        <button onClick={() => removeCriteriaFromSetup(setup.id, c)} className="hover:text-rose-400 ml-1">×</button>
+                                                    </span>
+                                                ))}
+                                                <button
+                                                    onClick={() => setSelectedSetupForCriteria(selectedSetupForCriteria === setup.id ? null : setup.id)}
+                                                    className="px-2 py-1 bg-slate-700/50 text-slate-400 text-xs rounded hover:bg-slate-700 border border-dashed border-slate-600"
+                                                >
+                                                    + Add Criteria
+                                                </button>
+                                            </div>
+
+                                            {selectedSetupForCriteria === setup.id && (
+                                                <div className="flex gap-2 mt-2">
+                                                    <select
+                                                        value={newCriteria}
+                                                        onChange={(e) => setNewCriteria(e.target.value)}
+                                                        className="flex-1 bg-slate-800 text-slate-300 text-xs px-2 py-1 rounded border border-slate-700"
+                                                    >
+                                                        <option value="">Select criteria...</option>
+                                                        {CRITERIA_LIBRARY.filter(c => !setup.criteria.includes(c)).map(c => (
+                                                            <option key={c} value={c}>{c}</option>
+                                                        ))}
+                                                    </select>
+                                                    <button onClick={() => { addCriteriaToSetup(setup.id, newCriteria); setSelectedSetupForCriteria(null); }} className="px-3 py-1 bg-blue-600 text-white text-xs rounded">Add</button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
                     </div>
                 </div>
             )}
 
             {/* New Entry Form */}
             {showNewEntry && (
-                <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
-                    <div className="bg-slate-800 rounded-xl border border-slate-700 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-                        <div className="p-4 border-b border-slate-700 flex items-center justify-between">
-                            <h3 className="text-lg font-bold text-white">
+                <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+                    <div className="bg-slate-900 rounded-xl border border-slate-700 w-full max-w-3xl max-h-[95vh] overflow-y-auto shadow-2xl shadow-black">
+                        <div className="p-5 border-b border-slate-800 flex items-center justify-between sticky top-0 bg-slate-900 z-10">
+                            <h3 className="text-xl font-bold text-white flex items-center gap-2">
                                 {editingEntry ? '✏️ Edit Entry' : '📝 New Journal Entry'}
                             </h3>
-                            <button onClick={resetForm} className="text-slate-400 hover:text-white text-xl">✕</button>
+                            <button onClick={resetForm} className="bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white w-8 h-8 rounded-full flex items-center justify-center transition-colors">✕</button>
                         </div>
 
-                        <div className="p-4 space-y-4">
-                            {/* Row 1: Date, Time, Symbol */}
-                            <div className="grid grid-cols-3 gap-3">
+                        <div className="p-6 space-y-6">
+                            {/* Section 1: Instrument & Time */}
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                                 <div>
-                                    <label className="text-xs text-slate-400 block mb-1">Date</label>
+                                    <label className="text-[10px] uppercase text-slate-500 font-bold block mb-1.5">Date</label>
                                     <input
                                         type="date"
                                         value={formData.date}
                                         onChange={(e) => setFormData(p => ({ ...p, date: e.target.value }))}
-                                        className="w-full bg-slate-700 text-slate-100 px-3 py-2 rounded border border-slate-600 text-sm"
+                                        className="w-full bg-slate-800 text-slate-100 px-3 py-2 rounded focus:ring-1 focus:ring-amber-500 border border-slate-700 outline-none text-sm"
                                     />
                                 </div>
                                 <div>
-                                    <label className="text-xs text-slate-400 block mb-1">Time</label>
+                                    <label className="text-[10px] uppercase text-slate-500 font-bold block mb-1.5">Time</label>
                                     <input
                                         type="time"
                                         value={formData.time}
                                         onChange={(e) => setFormData(p => ({ ...p, time: e.target.value }))}
-                                        className="w-full bg-slate-700 text-slate-100 px-3 py-2 rounded border border-slate-600 text-sm"
+                                        className="w-full bg-slate-800 text-slate-100 px-3 py-2 rounded focus:ring-1 focus:ring-amber-500 border border-slate-700 outline-none text-sm"
                                     />
                                 </div>
                                 <div>
-                                    <label className="text-xs text-slate-400 block mb-1">Symbol</label>
+                                    <label className="text-[10px] uppercase text-slate-500 font-bold block mb-1.5">Symbol</label>
                                     <input
                                         type="text"
-                                        placeholder="AAPL"
+                                        list="tickers"
+                                        placeholder="MES"
                                         value={formData.symbol}
-                                        onChange={(e) => setFormData(p => ({ ...p, symbol: e.target.value.toUpperCase() }))}
-                                        className="w-full bg-slate-700 text-slate-100 px-3 py-2 rounded border border-slate-600 text-sm uppercase"
+                                        onChange={(e) => handleSymbolChange(e.target.value)}
+                                        className="w-full bg-slate-800 text-slate-100 px-3 py-2 rounded focus:ring-1 focus:ring-amber-500 border border-slate-700 outline-none text-sm font-bold uppercase"
+                                    />
+                                    <datalist id="tickers">
+                                        {Object.keys(FUTURES_SYMBOLS).map(s => <option key={s} value={s} />)}
+                                    </datalist>
+                                </div>
+                                <div>
+                                    <label className="text-[10px] uppercase text-slate-500 font-bold block mb-1.5">Tick Value ($)</label>
+                                    <input
+                                        type="number"
+                                        value={formData.tickValue}
+                                        onChange={(e) => setFormData(p => ({ ...p, tickValue: e.target.value }))}
+                                        className="w-full bg-slate-800 text-slate-100 px-3 py-2 rounded focus:ring-1 focus:ring-amber-500 border border-slate-700 outline-none text-sm"
                                     />
                                 </div>
                             </div>
 
-                            {/* Row 2: Setup */}
-                            <div>
-                                <label className="text-xs text-slate-400 block mb-1">Setup</label>
-                                <select
-                                    value={formData.setupId}
-                                    onChange={(e) => setFormData(p => ({ ...p, setupId: e.target.value, criteriaUsed: [] }))}
-                                    className="w-full bg-slate-700 text-slate-200 px-3 py-2 rounded border border-slate-600 text-sm"
-                                >
-                                    <option value="">Select setup...</option>
-                                    {setups.map(s => (
-                                        <option key={s.id} value={s.id}>{s.name}</option>
-                                    ))}
-                                </select>
+                            {/* Section 2: Setup Details */}
+                            <div className="bg-slate-800/30 p-4 rounded-lg border border-slate-700/50">
+                                <label className="text-[10px] uppercase text-slate-500 font-bold block mb-2">Strategy Setup</label>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <select
+                                        value={formData.setupId}
+                                        onChange={(e) => setFormData(p => ({ ...p, setupId: e.target.value, criteriaUsed: [] }))}
+                                        className="w-full bg-slate-800 text-slate-200 px-3 py-2 rounded border border-slate-600 focus:border-amber-500 outline-none"
+                                    >
+                                        <option value="">Select a setup...</option>
+                                        {setups.map(s => (
+                                            <option key={s.id} value={s.id}>{s.name}</option>
+                                        ))}
+                                    </select>
+
+                                    {formData.setupId && (
+                                        <div className="flex flex-wrap gap-2">
+                                            {getSetupById(formData.setupId)?.criteria.map(c => (
+                                                <button
+                                                    key={c}
+                                                    onClick={() => setFormData(p => ({
+                                                        ...p,
+                                                        criteriaUsed: p.criteriaUsed.includes(c)
+                                                            ? p.criteriaUsed.filter(x => x !== c)
+                                                            : [...p.criteriaUsed, c]
+                                                    }))}
+                                                    className={`px-2 py-1 text-xs rounded border transition-all ${formData.criteriaUsed.includes(c)
+                                                        ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/50'
+                                                        : 'bg-slate-700 text-slate-400 border-slate-600'
+                                                        }`}
+                                                >
+                                                    {formData.criteriaUsed.includes(c) ? '✓ ' : ''}{c}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
                             </div>
 
-                            {/* Row 3: Criteria Used */}
-                            {formData.setupId && (
-                                <div>
-                                    <label className="text-xs text-slate-400 block mb-1">Criteria Used</label>
-                                    <div className="flex flex-wrap gap-2">
-                                        {getSetupById(formData.setupId)?.criteria.map(c => (
-                                            <button
-                                                key={c}
-                                                onClick={() => setFormData(p => ({
-                                                    ...p,
-                                                    criteriaUsed: p.criteriaUsed.includes(c)
-                                                        ? p.criteriaUsed.filter(x => x !== c)
-                                                        : [...p.criteriaUsed, c]
-                                                }))}
-                                                className={`px-2 py-1 text-xs rounded border ${formData.criteriaUsed.includes(c)
-                                                    ? 'bg-amber-500/20 text-amber-400 border-amber-500/50'
-                                                    : 'bg-slate-700 text-slate-400 border-slate-600'
-                                                    }`}
-                                            >
-                                                {formData.criteriaUsed.includes(c) ? '✓ ' : ''}{c}
-                                            </button>
-                                        ))}
+                            {/* Section 3: Execution */}
+                            <div>
+                                <h4 className="text-xs uppercase text-amber-500 font-bold mb-3 border-b border-amber-500/20 pb-1">Execution Details</h4>
+                                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                                    <div>
+                                        <label className="text-[10px] text-slate-500 block mb-1">Key Level</label>
+                                        <input
+                                            type="number" step="0.25"
+                                            value={formData.level} onChange={(e) => setFormData(p => ({ ...p, level: e.target.value }))}
+                                            className="w-full bg-slate-800 text-slate-100 px-3 py-2 rounded border border-slate-700 text-sm font-mono"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-[10px] text-rose-400 block mb-1">Stop Loss</label>
+                                        <input
+                                            type="number" step="0.25"
+                                            value={formData.stopLoss} onChange={(e) => setFormData(p => ({ ...p, stopLoss: e.target.value }))}
+                                            className="w-full bg-slate-800 text-rose-300 px-3 py-2 rounded border border-rose-900/30 text-sm font-mono focus:border-rose-500"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-[10px] text-slate-300 block mb-1">Entry Price</label>
+                                        <input
+                                            type="number" step="0.25"
+                                            value={formData.entry} onChange={(e) => setFormData(p => ({ ...p, entry: e.target.value }))}
+                                            className="w-full bg-slate-800 text-white px-3 py-2 rounded border border-slate-500 text-sm font-mono font-bold"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-[10px] text-emerald-400 block mb-1">Take Profit (Target)</label>
+                                        <input
+                                            type="number" step="0.25"
+                                            value={formData.takeProfit} onChange={(e) => setFormData(p => ({ ...p, takeProfit: e.target.value }))}
+                                            className="w-full bg-slate-800 text-emerald-300 px-3 py-2 rounded border border-emerald-900/30 text-sm font-mono focus:border-emerald-500"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-[10px] text-slate-300 block mb-1">Exit Price</label>
+                                        <input
+                                            type="number" step="0.25"
+                                            value={formData.exit} onChange={(e) => setFormData(p => ({ ...p, exit: e.target.value }))}
+                                            className="w-full bg-slate-800 text-white px-3 py-2 rounded border border-slate-500 text-sm font-mono font-bold"
+                                        />
                                     </div>
                                 </div>
-                            )}
-
-                            {/* Row 4: Price Levels */}
-                            <div className="grid grid-cols-5 gap-3">
-                                <div>
-                                    <label className="text-xs text-slate-400 block mb-1">Level</label>
+                                <div className="mt-3 w-32">
+                                    <label className="text-[10px] text-slate-500 block mb-1">Contracts/Qty</label>
                                     <input
-                                        type="number"
-                                        step="0.01"
-                                        placeholder="0.00"
-                                        value={formData.level}
-                                        onChange={(e) => setFormData(p => ({ ...p, level: e.target.value }))}
-                                        className="w-full bg-slate-700 text-slate-100 px-3 py-2 rounded border border-slate-600 text-sm"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="text-xs text-slate-400 block mb-1">Stop Loss</label>
-                                    <input
-                                        type="number"
-                                        step="0.01"
-                                        placeholder="0.00"
-                                        value={formData.stopLoss}
-                                        onChange={(e) => setFormData(p => ({ ...p, stopLoss: e.target.value }))}
-                                        className="w-full bg-slate-700 text-rose-300 px-3 py-2 rounded border border-slate-600 text-sm"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="text-xs text-slate-400 block mb-1">Take Profit</label>
-                                    <input
-                                        type="number"
-                                        step="0.01"
-                                        placeholder="0.00"
-                                        value={formData.takeProfit}
-                                        onChange={(e) => setFormData(p => ({ ...p, takeProfit: e.target.value }))}
-                                        className="w-full bg-slate-700 text-emerald-300 px-3 py-2 rounded border border-slate-600 text-sm"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="text-xs text-slate-400 block mb-1">Entry</label>
-                                    <input
-                                        type="number"
-                                        step="0.01"
-                                        placeholder="0.00"
-                                        value={formData.entry}
-                                        onChange={(e) => setFormData(p => ({ ...p, entry: e.target.value }))}
-                                        className="w-full bg-slate-700 text-slate-100 px-3 py-2 rounded border border-slate-600 text-sm"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="text-xs text-slate-400 block mb-1">Exit</label>
-                                    <input
-                                        type="number"
-                                        step="0.01"
-                                        placeholder="0.00"
-                                        value={formData.exit}
-                                        onChange={(e) => setFormData(p => ({ ...p, exit: e.target.value }))}
-                                        className="w-full bg-slate-700 text-slate-100 px-3 py-2 rounded border border-slate-600 text-sm"
+                                        type="number" step="1"
+                                        value={formData.quantity} onChange={(e) => setFormData(p => ({ ...p, quantity: e.target.value }))}
+                                        className="w-full bg-slate-800 text-slate-100 px-3 py-2 rounded border border-slate-700 text-sm"
                                     />
                                 </div>
                             </div>
 
-                            {/* Row 5: Quantity */}
-                            <div className="w-32">
-                                <label className="text-xs text-slate-400 block mb-1">Quantity</label>
-                                <input
-                                    type="number"
-                                    step="1"
-                                    value={formData.quantity}
-                                    onChange={(e) => setFormData(p => ({ ...p, quantity: e.target.value }))}
-                                    className="w-full bg-slate-700 text-slate-100 px-3 py-2 rounded border border-slate-600 text-sm"
-                                />
-                            </div>
-
-                            {/* Row 6: Images */}
-                            <div>
-                                <label className="text-xs text-slate-400 block mb-1">Screenshots</label>
-                                <div className="flex flex-wrap gap-2">
-                                    {formData.images.map((img, idx) => (
-                                        <div key={idx} className="relative group">
-                                            <img
-                                                src={img}
-                                                alt={`Screenshot ${idx + 1}`}
-                                                className="w-20 h-20 object-cover rounded cursor-pointer border border-slate-600 hover:border-amber-500"
-                                                onClick={() => setImageModal({ src: img, zoom: 1 })}
-                                            />
-                                            <button
-                                                onClick={() => removeImage(idx)}
-                                                className="absolute -top-1 -right-1 w-5 h-5 bg-rose-600 rounded-full text-white text-xs opacity-0 group-hover:opacity-100"
-                                            >
-                                                ✕
-                                            </button>
-                                        </div>
-                                    ))}
-                                    <button
-                                        onClick={() => fileInputRef.current?.click()}
-                                        className="w-20 h-20 border-2 border-dashed border-slate-600 rounded flex items-center justify-center text-slate-500 hover:border-slate-400 hover:text-slate-300"
-                                    >
-                                        📷+
-                                    </button>
-                                    <input
-                                        ref={fileInputRef}
-                                        type="file"
-                                        accept="image/*"
-                                        multiple
-                                        className="hidden"
-                                        onChange={handleImageUpload}
+                            {/* Section 4: Images & Notes */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div>
+                                    <label className="text-[10px] uppercase text-slate-500 font-bold block mb-2">Charts & Evidence</label>
+                                    <div className="flex flex-wrap gap-2">
+                                        {formData.images.map((img, idx) => (
+                                            <div key={idx} className="relative group">
+                                                <img
+                                                    src={img}
+                                                    alt={`Screenshot`}
+                                                    className="w-20 h-20 object-cover rounded border border-slate-700 cursor-zoom-in"
+                                                    onClick={() => setImageModal({ src: img, zoom: 1 })}
+                                                />
+                                                <button
+                                                    onClick={() => removeImage(idx)}
+                                                    className="absolute -top-2 -right-2 bg-rose-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
+                                                >
+                                                    ×
+                                                </button>
+                                            </div>
+                                        ))}
+                                        <button
+                                            onClick={() => fileInputRef.current?.click()}
+                                            className="w-20 h-20 border-2 border-dashed border-slate-700 rounded flex flex-col items-center justify-center text-slate-500 hover:border-amber-500 hover:text-amber-500 transition-colors"
+                                        >
+                                            <span className="text-xl">📷</span>
+                                            <span className="text-[9px] mt-1">ADD</span>
+                                        </button>
+                                        <input
+                                            ref={fileInputRef}
+                                            type="file"
+                                            accept="image/*"
+                                            multiple
+                                            className="hidden"
+                                            onChange={handleImageUpload}
+                                        />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="text-[10px] uppercase text-slate-500 font-bold block mb-2">Analysis Notes</label>
+                                    <textarea
+                                        placeholder="Psychology, execution errors, market context..."
+                                        value={formData.notes}
+                                        onChange={(e) => setFormData(p => ({ ...p, notes: e.target.value }))}
+                                        className="w-full bg-slate-800 text-slate-100 px-3 py-2 rounded border border-slate-700 text-sm h-24 resize-none leading-relaxed focus:border-amber-500 outline-none"
                                     />
                                 </div>
-                            </div>
-
-                            {/* Row 7: Notes */}
-                            <div>
-                                <label className="text-xs text-slate-400 block mb-1">Notes</label>
-                                <textarea
-                                    placeholder="What did you learn? What went well/wrong?"
-                                    value={formData.notes}
-                                    onChange={(e) => setFormData(p => ({ ...p, notes: e.target.value }))}
-                                    className="w-full bg-slate-700 text-slate-100 px-3 py-2 rounded border border-slate-600 text-sm h-24 resize-none"
-                                />
                             </div>
                         </div>
 
-                        <div className="p-4 border-t border-slate-700 flex justify-end space-x-3">
-                            <button onClick={resetForm} className="px-4 py-2 bg-slate-700 text-slate-300 rounded">
+                        <div className="p-4 border-t border-slate-800 bg-slate-800/30 flex justify-end space-x-3">
+                            <button onClick={resetForm} className="px-5 py-2.5 bg-transparent hover:bg-slate-800 text-slate-400 hover:text-white rounded transition-colors text-sm font-medium">
                                 Cancel
                             </button>
                             <button
                                 onClick={handleSubmit}
-                                className="px-6 py-2 bg-amber-500 hover:bg-amber-400 text-black font-bold rounded"
+                                className="px-8 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-bold rounded shadow-lg shadow-amber-500/20 transform active:scale-95 transition-all text-sm"
                             >
-                                {editingEntry ? 'Save Changes' : 'Add Entry'}
+                                {editingEntry ? 'Update Journal Entry' : 'Log Trade'}
                             </button>
                         </div>
                     </div>
@@ -722,122 +1003,40 @@ const TradingJournal = () => {
             {/* Image Modal */}
             {imageModal && (
                 <div
-                    className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4"
+                    className="fixed inset-0 bg-black/95 z-[60] flex items-center justify-center p-4 backdrop-blur-sm"
                     onClick={() => setImageModal(null)}
                 >
-                    <div className="relative max-w-[90vw] max-h-[90vh]" onClick={e => e.stopPropagation()}>
+                    <div className="relative w-full h-full flex items-center justify-center" onClick={e => e.stopPropagation()}>
                         <img
                             src={imageModal.src}
                             alt="Full size"
-                            style={{ transform: `scale(${imageModal.zoom})` }}
-                            className="max-w-full max-h-[85vh] object-contain transition-transform"
+                            style={{ transform: `scale(${imageModal.zoom})`, transition: 'transform 0.2s' }}
+                            className="max-w-[95%] max-h-[90vh] object-contain shadow-2xl"
                         />
-                        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center space-x-2 bg-slate-800/80 px-3 py-2 rounded-full">
+                        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center space-x-4 bg-slate-900/90 px-6 py-3 rounded-full border border-slate-700 shadow-xl">
                             <button
-                                onClick={() => setImageModal(p => p ? { ...p, zoom: Math.max(0.5, p.zoom - 0.25) } : null)}
-                                className="w-8 h-8 bg-slate-700 rounded-full text-white hover:bg-slate-600"
+                                onClick={() => setImageModal(p => p ? { ...p, zoom: Math.max(0.5, p.zoom - 0.5) } : null)}
+                                className="w-8 h-8 flex items-center justify-center bg-slate-700 rounded-full text-white hover:bg-slate-600 text-lg"
                             >
                                 −
                             </button>
-                            <span className="text-xs text-slate-300 w-12 text-center">{(imageModal.zoom * 100).toFixed(0)}%</span>
+                            <span className="text-sm font-mono text-amber-500 w-16 text-center">{(imageModal.zoom * 100).toFixed(0)}%</span>
                             <button
-                                onClick={() => setImageModal(p => p ? { ...p, zoom: Math.min(3, p.zoom + 0.25) } : null)}
-                                className="w-8 h-8 bg-slate-700 rounded-full text-white hover:bg-slate-600"
+                                onClick={() => setImageModal(p => p ? { ...p, zoom: Math.min(5, p.zoom + 0.5) } : null)}
+                                className="w-8 h-8 flex items-center justify-center bg-slate-700 rounded-full text-white hover:bg-slate-600 text-lg"
                             >
                                 +
                             </button>
                         </div>
                         <button
                             onClick={() => setImageModal(null)}
-                            className="absolute top-2 right-2 w-10 h-10 bg-slate-800/80 rounded-full text-white text-xl hover:bg-slate-700"
+                            className="absolute top-6 right-6 w-12 h-12 bg-slate-800/50 hover:bg-rose-600 text-white rounded-full text-2xl flex items-center justify-center transition-colors"
                         >
                             ✕
                         </button>
                     </div>
                 </div>
             )}
-
-            {/* Entries List */}
-            <div className="bg-slate-800/30 rounded-lg border border-slate-700">
-                <div className="p-4 border-b border-slate-700">
-                    <h3 className="text-lg font-bold text-white">📋 Journal Entries</h3>
-                </div>
-
-                {stats.filteredEntries.length === 0 ? (
-                    <div className="p-8 text-center text-slate-500">
-                        <div className="text-4xl mb-2">📔</div>
-                        <p>No entries yet. Start journaling your trades!</p>
-                    </div>
-                ) : (
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-sm">
-                            <thead className="text-slate-500 uppercase text-xs bg-slate-800/50">
-                                <tr>
-                                    <th className="text-left p-3">Date</th>
-                                    <th className="text-left p-3">Symbol</th>
-                                    <th className="text-left p-3">Setup</th>
-                                    <th className="text-right p-3">Entry</th>
-                                    <th className="text-right p-3">Exit</th>
-                                    <th className="text-right p-3">R Multiple</th>
-                                    <th className="text-right p-3">P&L</th>
-                                    <th className="text-center p-3">📷</th>
-                                    <th className="text-center p-3">Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody className="text-slate-300">
-                                {stats.filteredEntries.map(entry => (
-                                    <tr key={entry.id} className="border-t border-slate-700/50 hover:bg-slate-700/20">
-                                        <td className="p-3">
-                                            <div>{entry.date}</div>
-                                            <div className="text-xs text-slate-500">{entry.time}</div>
-                                        </td>
-                                        <td className="p-3 font-mono font-bold">{entry.symbol}</td>
-                                        <td className="p-3">
-                                            <span className={`px-2 py-0.5 rounded text-xs font-bold border ${getSetupColor(entry.setupId)}`}>
-                                                {getSetupById(entry.setupId)?.name || 'Unknown'}
-                                            </span>
-                                        </td>
-                                        <td className="p-3 text-right">${entry.entry.toFixed(2)}</td>
-                                        <td className="p-3 text-right">${entry.exit.toFixed(2)}</td>
-                                        <td className={`p-3 text-right font-bold ${entry.rMultiple >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                            {entry.rMultiple >= 0 ? '+' : ''}{entry.rMultiple.toFixed(2)}R
-                                        </td>
-                                        <td className={`p-3 text-right font-bold ${entry.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                            {entry.pnl >= 0 ? '+' : ''}${entry.pnl.toFixed(2)}
-                                        </td>
-                                        <td className="p-3 text-center">
-                                            {entry.images.length > 0 && (
-                                                <button
-                                                    onClick={() => setImageModal({ src: entry.images[0], zoom: 1 })}
-                                                    className="text-amber-400 hover:text-amber-300"
-                                                >
-                                                    🖼️ {entry.images.length}
-                                                </button>
-                                            )}
-                                        </td>
-                                        <td className="p-3 text-center">
-                                            <button
-                                                onClick={() => editEntry(entry)}
-                                                className="text-slate-400 hover:text-amber-400 mr-2"
-                                                title="Edit"
-                                            >
-                                                ✏️
-                                            </button>
-                                            <button
-                                                onClick={() => deleteEntry(entry.id)}
-                                                className="text-slate-400 hover:text-rose-400"
-                                                title="Delete"
-                                            >
-                                                🗑️
-                                            </button>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                )}
-            </div>
         </div>
     );
 };
