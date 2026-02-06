@@ -677,7 +677,7 @@ const TradingJournal = () => {
                                             })}
                                         </div>
                                         <div className="mt-2 text-[10px] text-slate-500 text-right">
-                                            Showing {filteredEntries.length} matching trades
+                                            Showing {filteredEntries.length} of {entries.filter(e => e.setupId === filterSetup).length} trades
                                             {/* Debug info */}
                                             <span className="block text-[9px] text-slate-700 mt-1 font-mono">
                                                 Filters: {filterCriteria.length > 0 ? filterCriteria.join(', ') : 'None'}
