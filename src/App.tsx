@@ -5,11 +5,12 @@ import EmpireDashboard from './components/EmpireDashboard';
 import AllWeatherCalculator from './components/AllWeatherCalculator';
 import FireTracker from './components/FireTracker';
 import IBKRTracker from './components/IBKRTracker';
+import TradingJournal from './components/TradingJournal';
 
 function App() {
   const [session, setSession] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'calculators' | 'fireTracker' | 'ibkrTracker'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'calculators' | 'fireTracker' | 'ibkrTracker' | 'tradingJournal'>('dashboard');
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -119,6 +120,18 @@ function App() {
               <div className="absolute bottom-[-5px] left-0 w-full h-0.5 bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.5)]"></div>
             )}
           </button>
+          <button
+            onClick={() => setActiveTab('tradingJournal')}
+            className={`pb-3 px-2 text-sm font-semibold tracking-wide transition-all relative ${activeTab === 'tradingJournal'
+              ? 'text-amber-400'
+              : 'text-slate-500 hover:text-slate-300'
+              }`}
+          >
+            TRADE JOURNAL
+            {activeTab === 'tradingJournal' && (
+              <div className="absolute bottom-[-5px] left-0 w-full h-0.5 bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.5)]"></div>
+            )}
+          </button>
         </div>
       </div>
 
@@ -178,6 +191,15 @@ function App() {
                 <span className="text-xs text-slate-500 font-mono">REALTEST</span>
               </div>
               <IBKRTracker />
+            </div>
+          </div>
+        )}
+
+        {/* TRADING JOURNAL TAB */}
+        {activeTab === 'tradingJournal' && (
+          <div className="animate-fade-in">
+            <div className="premium-card p-6 h-full bg-slate-900/80 backdrop-blur-sm">
+              <TradingJournal />
             </div>
           </div>
         )}
