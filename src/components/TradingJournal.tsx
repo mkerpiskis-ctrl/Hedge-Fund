@@ -18,12 +18,13 @@ interface JournalEntry {
     tickValue: number; // Value per 1 point move (e.g. 5 for MES)
     setupId: string;
     criteriaUsed: string[];
-    level: number;
-    stopLoss: number;
-    takeProfit: number;
     entry: number;
     exit: number;
+    stopLoss: number;
+    takeProfit: number;
+    maxMove: number;
     quantity: number;
+    commissions: number;
     pnl: number;
     pnlPercent: number;
     rMultiple: number;
@@ -39,37 +40,31 @@ const DEFAULT_SETUPS: SetupCategory[] = [
     { id: 'breakout', name: 'Breakout', criteria: ['Key Level Break', 'Volume Confirmation'], color: 'emerald' },
 ];
 
-// Default criteria library
-const CRITERIA_LIBRARY = [
-    'HTF EMA20 Price',
-    'HTF EMA50 Price',
-    'HTF VWAP Price',
-    'HTF Trend Direction',
-    'LTF EMA9 Cross',
-    'LTF Trend Direction',
-    'LTF Volume Spike',
-    'Key Level Break',
-    'Support/Resistance',
+// Default global criteria
+const DEFAULT_CRITERIA = [
+    'Trend Direction',
+    'EMA 20 Context',
+    'VWAP Context',
+    'Volume Profile',
     'Opening Range',
-    'Volume Confirmation',
+    'Key Level Break',
     'CVD Divergence',
-    'Oscillator Divergence',
 ];
 
 // Futures Config
-const FUTURES_SYMBOLS: Record<string, number> = {
-    'MES': 5,
-    'ES': 50,
-    'MNQ': 2,
-    'NQ': 20,
-    'MYM': 0.5,
-    'YM': 5,
-    'M2K': 5,
-    'RTY': 50,
-    'CL': 1000,
-    'MCL': 100,
-    'GC': 100,
-    'MGC': 10,
+const FUTURES_SYMBOLS: Record<string, { pointValue: number, commission: number }> = {
+    'MES': { pointValue: 5, commission: 1.82 },
+    'ES': { pointValue: 50, commission: 4.02 },
+    'MNQ': { pointValue: 2, commission: 1.82 },
+    'NQ': { pointValue: 20, commission: 4.02 },
+    'MYM': { pointValue: 0.5, commission: 1.82 },
+    'YM': { pointValue: 5, commission: 4.02 },
+    'M2K': { pointValue: 5, commission: 1.82 },
+    'RTY': { pointValue: 50, commission: 4.02 },
+    'CL': { pointValue: 1000, commission: 4.02 },
+    'MCL': { pointValue: 100, commission: 1.82 },
+    'GC': { pointValue: 100, commission: 4.02 },
+    'MGC': { pointValue: 10, commission: 1.82 },
 };
 
 const TradingJournal = () => {
@@ -85,6 +80,11 @@ const TradingJournal = () => {
     });
 
     const [activeSubTab, setActiveSubTab] = useState<'history' | 'totalStats' | 'setupStats'>('history');
+
+    const [criteriaLibrary, setCriteriaLibrary] = useState<string[]>(() => {
+        const saved = localStorage.getItem('tradingJournalCriteria');
+        return saved ? JSON.parse(saved) : DEFAULT_CRITERIA;
+    });
 
     // Filters
     const [filterSetup, setFilterSetup] = useState<string>('all');
@@ -110,12 +110,13 @@ const TradingJournal = () => {
         tickValue: '5',
         setupId: '',
         criteriaUsed: [] as string[],
-        level: '',
         stopLoss: '',
         takeProfit: '',
         entry: '',
         exit: '',
+        maxMove: '',
         quantity: '1',
+        commissions: '',
         notes: '',
         images: [] as string[],
     });
@@ -130,6 +131,10 @@ const TradingJournal = () => {
     useEffect(() => {
         localStorage.setItem('tradingJournalSetups', JSON.stringify(setups));
     }, [setups]);
+
+    useEffect(() => {
+        localStorage.setItem('tradingJournalCriteria', JSON.stringify(criteriaLibrary));
+    }, [criteriaLibrary]);
 
     // ============= Calculations =============
     const calculateStats = useCallback((entriesToCalc: JournalEntry[]) => {
@@ -233,11 +238,12 @@ const TradingJournal = () => {
 
     const handleSymbolChange = (val: string) => {
         const upperVal = val.toUpperCase();
-        const tickVal = FUTURES_SYMBOLS[upperVal];
+        const config = FUTURES_SYMBOLS[upperVal];
         setFormData(prev => ({
             ...prev,
             symbol: upperVal,
-            tickValue: tickVal ? tickVal.toString() : prev.tickValue
+            tickValue: config ? config.pointValue.toString() : prev.tickValue,
+            commissions: config ? config.commission.toString() : prev.commissions
         }));
     };
 
@@ -263,7 +269,8 @@ const TradingJournal = () => {
         }
 
         const rawPriceDiff = (exit - entry) * direction;
-        const pnl = rawPriceDiff * quantity * tickValue;
+        const commissions = parseFloat(formData.commissions) || 0;
+        const pnl = (rawPriceDiff * quantity * tickValue) - commissions;
 
         // PnL Percent is tricky for futures (margin based), so we use price % change
         const pnlPercent = entry > 0 ? (rawPriceDiff / entry) * 100 : 0;
@@ -276,19 +283,20 @@ const TradingJournal = () => {
         else if (pnl < 0) result = 'LOSS';
 
         const newEntry: JournalEntry = {
-            id: editingEntry?.id || `entry_${Date.now()} `,
+            id: editingEntry?.id || `entry_${Date.now()}`,
             date: formData.date,
             time: formData.time,
             symbol: formData.symbol.toUpperCase(),
             tickValue,
             setupId: formData.setupId,
             criteriaUsed: formData.criteriaUsed,
-            level: parseFloat(formData.level) || 0,
-            stopLoss,
-            takeProfit: parseFloat(formData.takeProfit) || 0,
             entry,
             exit,
+            stopLoss,
+            takeProfit: parseFloat(formData.takeProfit) || 0,
+            maxMove: parseFloat(formData.maxMove) || 0,
             quantity,
+            commissions,
             pnl,
             pnlPercent,
             rMultiple,
@@ -314,12 +322,13 @@ const TradingJournal = () => {
             tickValue: '5',
             setupId: '',
             criteriaUsed: [],
-            level: '',
             stopLoss: '',
             takeProfit: '',
             entry: '',
             exit: '',
+            maxMove: '',
             quantity: '1',
+            commissions: '',
             notes: '',
             images: [],
         });
@@ -335,12 +344,13 @@ const TradingJournal = () => {
             tickValue: entry.tickValue?.toString() || '1',
             setupId: entry.setupId,
             criteriaUsed: entry.criteriaUsed,
-            level: entry.level.toString(),
-            stopLoss: entry.stopLoss.toString(),
-            takeProfit: entry.takeProfit.toString(),
             entry: entry.entry.toString(),
             exit: entry.exit.toString(),
+            stopLoss: entry.stopLoss.toString(),
+            takeProfit: entry.takeProfit.toString(),
+            maxMove: entry.maxMove?.toString() || '',
             quantity: entry.quantity.toString(),
+            commissions: entry.commissions?.toString() || '',
             notes: entry.notes,
             images: entry.images,
         });
@@ -696,31 +706,38 @@ const TradingJournal = () => {
                                 <>
                                     <div className="bg-slate-800/30 p-4 rounded-lg border border-slate-700">
                                         <div className="text-xs text-slate-500 uppercase mb-2">Filter by Criteria</div>
-                                        <div className="flex flex-wrap gap-2">
-                                            {getSetupById(filterSetup)?.criteria.map(c => {
-                                                const isActive = filterCriteria.includes(c);
-                                                return (
-                                                    <button
-                                                        key={c}
-                                                        onClick={() => setFilterCriteria(prev =>
-                                                            isActive ? prev.filter(x => x !== c) : [...prev, c]
-                                                        )}
-                                                        className={`px-3 py-1.5 text-xs rounded-md border transition-all ${isActive
-                                                            ? 'bg-amber-500/20 text-amber-400 border-amber-500/50 shadow shadow-amber-900/20'
-                                                            : 'bg-slate-700/50 text-slate-400 border-slate-600 hover:bg-slate-700 hover:border-slate-500'
-                                                            }`}
-                                                    >
-                                                        {isActive ? '✓ ' : ''}{c}
-                                                    </button>
-                                                );
-                                            })}
+                                        <div className="p-4 border border-slate-700 rounded-lg bg-slate-800/20">
+                                            <div className="text-xs font-bold text-slate-500 uppercase mb-3 flex justify-between">
+                                                <span>Select Setup Criteria</span>
+                                                <span className="text-amber-500 lowercase font-normal italic">Required for analysis</span>
+                                            </div>
+                                            <div className="flex flex-wrap gap-2">
+                                                {getSetupById(filterSetup)?.criteria.length === 0 ? (
+                                                    <div className="text-xs text-slate-600 italic">No criteria defined for this setup. Go to Setups manager to add them.</div>
+                                                ) : (
+                                                    getSetupById(filterSetup)?.criteria.map(c => {
+                                                        const isActive = filterCriteria.includes(c);
+                                                        return (
+                                                            <button
+                                                                key={c}
+                                                                type="button"
+                                                                onClick={() => setFilterCriteria(prev =>
+                                                                    isActive ? prev.filter(x => x !== c) : [...prev, c]
+                                                                )}
+                                                                className={`px-3 py-1.5 text-xs rounded-lg border transition-all ${isActive
+                                                                    ? 'bg-amber-500/20 text-amber-400 border-amber-500/50 shadow-sm shadow-amber-900/20'
+                                                                    : 'bg-slate-800 text-slate-500 border-slate-700 hover:border-slate-600 hover:text-slate-400'
+                                                                    }`}
+                                                            >
+                                                                {isActive ? '✓ ' : ''}{c}
+                                                            </button>
+                                                        );
+                                                    })
+                                                )}
+                                            </div>
                                         </div>
                                         <div className="mt-2 text-[10px] text-slate-500 text-right">
                                             Showing {filteredEntries.length} of {entries.filter(e => e.setupId === filterSetup).length} trades
-                                            {/* Debug info */}
-                                            <span className="block text-[9px] text-slate-700 mt-1 font-mono">
-                                                Filters: {filterCriteria.length > 0 ? filterCriteria.join(', ') : 'None'}
-                                            </span>
                                         </div>
                                     </div>
 
@@ -825,67 +842,128 @@ const TradingJournal = () => {
                             <button onClick={() => setShowSetupManager(false)} className="text-slate-400 hover:text-white">✕</button>
                         </div>
 
-                        <div className="p-6 space-y-6">
-                            <div className="flex gap-2">
-                                <input
-                                    type="text"
-                                    placeholder="New setup name (e.g. 'Bear Flag')"
-                                    value={newSetupName}
-                                    onChange={(e) => setNewSetupName(e.target.value)}
-                                    className="flex-1 bg-slate-800 text-slate-100 px-4 py-2 rounded border border-slate-700 focus:border-amber-500 outline-none"
-                                />
-                                <button
-                                    onClick={addSetup}
-                                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded"
-                                >
-                                    Add Setup
-                                </button>
+                        <div className="flex-1 overflow-y-auto p-6 space-y-10">
+                            {/* Section 1: Global Criteria Library */}
+                            <div>
+                                <h4 className="text-sm font-bold text-amber-500 uppercase mb-4 flex items-center gap-2">
+                                    📚 Global Criteria Library
+                                    <span className="text-[10px] font-normal text-slate-500 lowercase normal-case italic">(Criteria available for all setups)</span>
+                                </h4>
+                                <div className="bg-slate-800/40 p-5 rounded-xl border border-slate-700 space-y-4 shadow-inner">
+                                    <div className="flex gap-2">
+                                        <input
+                                            type="text"
+                                            placeholder="Add new criteria (e.g. 'RSI Divergence')"
+                                            value={newCriteria}
+                                            onChange={(e) => setNewCriteria(e.target.value)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter' && newCriteria.trim()) {
+                                                    setCriteriaLibrary(prev => [...prev, newCriteria.trim()]);
+                                                    setNewCriteria('');
+                                                }
+                                            }}
+                                            className="flex-1 bg-slate-900 text-slate-100 px-4 py-2.5 rounded-lg border border-slate-700 focus:border-amber-500 outline-none transition-colors"
+                                        />
+                                        <button
+                                            onClick={() => {
+                                                if (!newCriteria.trim()) return;
+                                                setCriteriaLibrary(prev => [...prev, newCriteria.trim()]);
+                                                setNewCriteria('');
+                                            }}
+                                            className="px-6 py-2.5 bg-amber-600 hover:bg-amber-500 text-black font-bold rounded-lg transition-colors"
+                                        >
+                                            Add
+                                        </button>
+                                    </div>
+                                    <div className="flex flex-wrap gap-2 min-h-[40px]">
+                                        {criteriaLibrary.length === 0 ? (
+                                            <div className="text-xs text-slate-600 italic">No criteria in library. Add some above.</div>
+                                        ) : (
+                                            criteriaLibrary.map(c => (
+                                                <span key={c} className="px-3 py-1.5 bg-slate-800 text-slate-300 text-xs rounded-lg border border-slate-700 flex items-center gap-2 group hover:border-slate-500 transition-colors">
+                                                    {c}
+                                                    <button
+                                                        onClick={() => setCriteriaLibrary(prev => prev.filter(x => x !== c))}
+                                                        className="text-slate-500 hover:text-rose-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                        title="Remove from library"
+                                                    >
+                                                        ✕
+                                                    </button>
+                                                </span>
+                                            ))
+                                        )}
+                                    </div>
+                                </div>
                             </div>
 
-                            <div className="space-y-4">
-                                {setups.map(setup => (
-                                    <div key={setup.id} className="bg-slate-800/30 p-4 rounded-lg border border-slate-700">
-                                        <div className="flex items-center justify-between mb-3">
-                                            <span className={`px-2 py-1 rounded text-sm font-bold border ${getSetupColor(setup.id)}`}>
-                                                {setup.name}
-                                            </span>
-                                            <button onClick={() => deleteSetup(setup.id)} className="text-slate-500 hover:text-rose-400 text-xs uppercase font-bold">Delete</button>
-                                        </div>
+                            <hr className="border-slate-800 mx-[-1.5rem]" />
 
-                                        <div className="space-y-2">
-                                            <div className="flex flex-wrap gap-2">
-                                                {setup.criteria.map(c => (
-                                                    <span key={c} className="px-2 py-1 bg-slate-700 text-slate-300 text-xs rounded flex items-center gap-1">
-                                                        {c}
-                                                        <button onClick={() => removeCriteriaFromSetup(setup.id, c)} className="hover:text-rose-400 ml-1">×</button>
-                                                    </span>
-                                                ))}
-                                                <button
-                                                    onClick={() => setSelectedSetupForCriteria(selectedSetupForCriteria === setup.id ? null : setup.id)}
-                                                    className="px-2 py-1 bg-slate-700/50 text-slate-400 text-xs rounded hover:bg-slate-700 border border-dashed border-slate-600"
-                                                >
-                                                    + Add Criteria
-                                                </button>
+                            {/* Section 2: Specific Setups */}
+                            <div className="space-y-6">
+                                <h4 className="text-sm font-bold text-amber-500 uppercase flex items-center gap-2">
+                                    🏠 Strategy Setups
+                                </h4>
+                                <div className="flex gap-2">
+                                    <input
+                                        type="text"
+                                        placeholder="New setup name (e.g. 'Bear Flag')"
+                                        value={newSetupName}
+                                        onChange={(e) => setNewSetupName(e.target.value)}
+                                        className="flex-1 bg-slate-800 text-slate-100 px-4 py-2 rounded border border-slate-700 focus:border-amber-500 outline-none"
+                                    />
+                                    <button
+                                        onClick={addSetup}
+                                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded"
+                                    >
+                                        Add Setup
+                                    </button>
+                                </div>
+
+                                <div className="space-y-4">
+                                    {setups.map(setup => (
+                                        <div key={setup.id} className="bg-slate-800/30 p-4 rounded-lg border border-slate-700">
+                                            <div className="flex items-center justify-between mb-3">
+                                                <span className={`px-2 py-1 rounded text-sm font-bold border ${getSetupColor(setup.id)}`}>
+                                                    {setup.name}
+                                                </span>
+                                                <button onClick={() => deleteSetup(setup.id)} className="text-slate-500 hover:text-rose-400 text-xs uppercase font-bold">Delete</button>
                                             </div>
 
-                                            {selectedSetupForCriteria === setup.id && (
-                                                <div className="flex gap-2 mt-2">
-                                                    <select
-                                                        value={newCriteria}
-                                                        onChange={(e) => setNewCriteria(e.target.value)}
-                                                        className="flex-1 bg-slate-800 text-slate-300 text-xs px-2 py-1 rounded border border-slate-700"
+                                            <div className="space-y-2">
+                                                <div className="flex flex-wrap gap-2">
+                                                    {setup.criteria.map(c => (
+                                                        <span key={c} className="px-2 py-1 bg-slate-700 text-slate-300 text-xs rounded flex items-center gap-1">
+                                                            {c}
+                                                            <button onClick={() => removeCriteriaFromSetup(setup.id, c)} className="hover:text-rose-400 ml-1">×</button>
+                                                        </span>
+                                                    ))}
+                                                    <button
+                                                        onClick={() => setSelectedSetupForCriteria(selectedSetupForCriteria === setup.id ? null : setup.id)}
+                                                        className="px-2 py-1 bg-slate-700/50 text-slate-400 text-xs rounded hover:bg-slate-700 border border-dashed border-slate-600"
                                                     >
-                                                        <option value="">Select criteria...</option>
-                                                        {CRITERIA_LIBRARY.filter(c => !setup.criteria.includes(c)).map(c => (
-                                                            <option key={c} value={c}>{c}</option>
-                                                        ))}
-                                                    </select>
-                                                    <button onClick={() => { addCriteriaToSetup(setup.id, newCriteria); setSelectedSetupForCriteria(null); }} className="px-3 py-1 bg-blue-600 text-white text-xs rounded">Add</button>
+                                                        + Add Criteria
+                                                    </button>
                                                 </div>
-                                            )}
+
+                                                {selectedSetupForCriteria === setup.id && (
+                                                    <div className="flex gap-2 mt-2">
+                                                        <select
+                                                            value={newCriteria}
+                                                            onChange={(e) => setNewCriteria(e.target.value)}
+                                                            className="flex-1 bg-slate-800 text-slate-300 text-xs px-2 py-1 rounded border border-slate-700"
+                                                        >
+                                                            <option value="">Select criteria...</option>
+                                                            {criteriaLibrary.filter(c => !setup.criteria.includes(c)).map(c => (
+                                                                <option key={c} value={c}>{c}</option>
+                                                            ))}
+                                                        </select>
+                                                        <button onClick={() => { addCriteriaToSetup(setup.id, newCriteria); setSelectedSetupForCriteria(null); }} className="px-3 py-1 bg-blue-600 text-white text-xs rounded">Add</button>
+                                                    </div>
+                                                )}
+                                            </div>
                                         </div>
-                                    </div>
-                                ))}
+                                    ))}
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -895,17 +973,17 @@ const TradingJournal = () => {
             {/* New Entry Form */}
             {showNewEntry && (
                 <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-                    <div className="bg-slate-900 rounded-xl border border-slate-700 w-full max-w-3xl max-h-[95vh] overflow-y-auto shadow-2xl shadow-black">
-                        <div className="p-5 border-b border-slate-800 flex items-center justify-between sticky top-0 bg-slate-900 z-10">
+                    <div className="bg-slate-900 rounded-xl border border-slate-700 w-full max-w-3xl max-h-[95vh] flex flex-col shadow-2xl shadow-black overflow-hidden">
+                        <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900">
                             <h3 className="text-xl font-bold text-white flex items-center gap-2">
                                 {editingEntry ? '✏️ Edit Entry' : '📝 New Journal Entry'}
                             </h3>
                             <button onClick={resetForm} className="bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white w-8 h-8 rounded-full flex items-center justify-center transition-colors">✕</button>
                         </div>
 
-                        <div className="p-6 space-y-6">
+                        <div className="flex-1 overflow-y-auto p-6 space-y-8">
                             {/* Section 1: Instrument & Time */}
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
                                 <div>
                                     <label className="text-[10px] uppercase text-slate-500 font-bold block mb-1.5">Date</label>
                                     <input
@@ -950,115 +1028,155 @@ const TradingJournal = () => {
                             </div>
 
                             {/* Section 2: Setup Details */}
-                            <div className="bg-slate-800/30 p-4 rounded-lg border border-slate-700/50">
-                                <label className="text-[10px] uppercase text-slate-500 font-bold block mb-2">Strategy Setup</label>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="bg-slate-800/20 p-5 rounded-xl border border-slate-700/50 space-y-4">
+                                <div>
+                                    <label className="text-[10px] uppercase text-slate-500 font-bold block mb-2">Strategy Setup</label>
                                     <select
                                         value={formData.setupId}
                                         onChange={(e) => setFormData(p => ({ ...p, setupId: e.target.value, criteriaUsed: [] }))}
-                                        className="w-full bg-slate-800 text-slate-200 px-3 py-2 rounded border border-slate-600 focus:border-amber-500 outline-none"
+                                        className="w-full bg-slate-800 text-slate-200 px-4 py-2.5 rounded-lg border border-slate-600 focus:border-amber-500 outline-none"
                                     >
                                         <option value="">Select a setup...</option>
                                         {setups.map(s => (
                                             <option key={s.id} value={s.id}>{s.name}</option>
                                         ))}
                                     </select>
-
-                                    {formData.setupId && (
-                                        <div className="flex flex-wrap gap-2">
-                                            {getSetupById(formData.setupId)?.criteria.map(c => (
-                                                <button
-                                                    key={c}
-                                                    onClick={() => setFormData(p => ({
-                                                        ...p,
-                                                        criteriaUsed: p.criteriaUsed.includes(c)
-                                                            ? p.criteriaUsed.filter(x => x !== c)
-                                                            : [...p.criteriaUsed, c]
-                                                    }))}
-                                                    className={`px-2 py-1 text-xs rounded border transition-all ${formData.criteriaUsed.includes(c)
-                                                        ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/50'
-                                                        : 'bg-slate-700 text-slate-400 border-slate-600'
-                                                        }`}
-                                                >
-                                                    {formData.criteriaUsed.includes(c) ? '✓ ' : ''}{c}
-                                                </button>
-                                            ))}
-                                        </div>
-                                    )}
                                 </div>
+
+                                {formData.setupId && (
+                                    <div>
+                                        <label className="text-[10px] uppercase text-slate-500 font-bold block mb-2">Select Criteria</label>
+                                        <div className="flex flex-wrap gap-2">
+                                            {/* Combined view: show library criteria, highlight if in setup */}
+                                            {criteriaLibrary.map(c => {
+                                                const isInSetup = getSetupById(formData.setupId)?.criteria.includes(c);
+                                                const isSelected = formData.criteriaUsed.includes(c);
+                                                return (
+                                                    <button
+                                                        key={c}
+                                                        onClick={() => setFormData(p => ({
+                                                            ...p,
+                                                            criteriaUsed: isSelected
+                                                                ? p.criteriaUsed.filter(x => x !== c)
+                                                                : [...p.criteriaUsed, c]
+                                                        }))}
+                                                        className={`px-3 py-1.5 text-xs rounded-lg border transition-all flex items-center gap-1.5 ${isSelected
+                                                            ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/50 shadow-sm shadow-emerald-500/10'
+                                                            : isInSetup
+                                                                ? 'bg-slate-800/50 text-slate-300 border-amber-500/30'
+                                                                : 'bg-slate-900/50 text-slate-500 border-slate-800'
+                                                            }`}
+                                                    >
+                                                        {isSelected && <span>✓</span>}
+                                                        {c}
+                                                        {isInSetup && !isSelected && <span className="text-[8px] text-amber-500/50 ml-1">★</span>}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                        <p className="text-[9px] text-slate-600 mt-2 italic">★ Starred criteria are recommended for the selected setup.</p>
+                                    </div>
+                                )}
                             </div>
 
-                            {/* Section 3: Execution */}
-                            <div>
-                                <h4 className="text-xs uppercase text-amber-500 font-bold mb-3 border-b border-amber-500/20 pb-1">Execution Details</h4>
-                                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                                    <div>
-                                        <label className="text-[10px] text-slate-500 block mb-1">Key Level</label>
-                                        <input
-                                            type="number" step="0.25"
-                                            value={formData.level} onChange={(e) => setFormData(p => ({ ...p, level: e.target.value }))}
-                                            className="w-full bg-slate-800 text-slate-100 px-3 py-2 rounded border border-slate-700 text-sm font-mono"
-                                        />
+                            {/* Section 3: Execution Details */}
+                            <div className="space-y-4">
+                                <h4 className="text-[10px] uppercase text-amber-500 font-bold tracking-widest border-b border-amber-500/20 pb-1.5">Execution Details</h4>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                                    <div className="space-y-4">
+                                        <div>
+                                            <label className="block text-[10px] text-slate-500 uppercase font-bold mb-1.5">Entry Price</label>
+                                            <input
+                                                type="number" step="0.25"
+                                                value={formData.entry}
+                                                onChange={(e) => setFormData(p => ({ ...p, entry: e.target.value }))}
+                                                className="w-full bg-slate-800 text-white px-3 py-2.5 rounded-lg border border-slate-700 text-sm font-mono font-bold focus:border-amber-500 outline-none"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[10px] text-rose-400 uppercase font-bold mb-1.5">Stop Loss</label>
+                                            <input
+                                                type="number" step="0.25"
+                                                value={formData.stopLoss}
+                                                onChange={(e) => setFormData(p => ({ ...p, stopLoss: e.target.value }))}
+                                                className="w-full bg-slate-800 text-rose-300 px-3 py-2.5 rounded-lg border border-rose-900/30 text-sm font-mono focus:border-rose-500 outline-none"
+                                            />
+                                        </div>
                                     </div>
-                                    <div>
-                                        <label className="text-[10px] text-rose-400 block mb-1">Stop Loss</label>
-                                        <input
-                                            type="number" step="0.25"
-                                            value={formData.stopLoss} onChange={(e) => setFormData(p => ({ ...p, stopLoss: e.target.value }))}
-                                            className="w-full bg-slate-800 text-rose-300 px-3 py-2 rounded border border-rose-900/30 text-sm font-mono focus:border-rose-500"
-                                        />
+
+                                    <div className="space-y-4">
+                                        <div>
+                                            <label className="block text-[10px] text-slate-300 uppercase font-bold mb-1.5">Exit Price</label>
+                                            <input
+                                                type="number" step="0.25"
+                                                value={formData.exit}
+                                                onChange={(e) => setFormData(p => ({ ...p, exit: e.target.value }))}
+                                                className="w-full bg-slate-800 text-white px-3 py-2.5 rounded-lg border border-slate-700 text-sm font-mono font-bold focus:border-amber-500 outline-none"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[10px] text-emerald-400 uppercase font-bold mb-1.5">Take Profit</label>
+                                            <input
+                                                type="number" step="0.25"
+                                                value={formData.takeProfit}
+                                                onChange={(e) => setFormData(p => ({ ...p, takeProfit: e.target.value }))}
+                                                className="w-full bg-slate-800 text-emerald-300 px-3 py-2.5 rounded-lg border border-emerald-900/30 text-sm font-mono focus:border-emerald-500 outline-none"
+                                            />
+                                        </div>
                                     </div>
-                                    <div>
-                                        <label className="text-[10px] text-slate-300 block mb-1">Entry Price</label>
-                                        <input
-                                            type="number" step="0.25"
-                                            value={formData.entry} onChange={(e) => setFormData(p => ({ ...p, entry: e.target.value }))}
-                                            className="w-full bg-slate-800 text-white px-3 py-2 rounded border border-slate-500 text-sm font-mono font-bold"
-                                        />
+
+                                    <div className="space-y-4">
+                                        <div>
+                                            <label className="block text-[10px] text-slate-500 uppercase font-bold mb-1.5">Quantity</label>
+                                            <input
+                                                type="number" step="1"
+                                                value={formData.quantity}
+                                                onChange={(e) => setFormData(p => ({ ...p, quantity: e.target.value }))}
+                                                className="w-full bg-slate-800 text-slate-100 px-3 py-2.5 rounded-lg border border-slate-700 text-sm focus:border-amber-500 outline-none"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[10px] text-slate-400 uppercase font-bold mb-1.5">Commissions ($)</label>
+                                            <input
+                                                type="number" step="0.01"
+                                                value={formData.commissions}
+                                                onChange={(e) => setFormData(p => ({ ...p, commissions: e.target.value }))}
+                                                className="w-full bg-slate-800 text-slate-200 px-3 py-2.5 rounded-lg border border-slate-700 text-sm focus:border-amber-500 outline-none"
+                                            />
+                                        </div>
                                     </div>
-                                    <div>
-                                        <label className="text-[10px] text-emerald-400 block mb-1">Take Profit (Target)</label>
-                                        <input
-                                            type="number" step="0.25"
-                                            value={formData.takeProfit} onChange={(e) => setFormData(p => ({ ...p, takeProfit: e.target.value }))}
-                                            className="w-full bg-slate-800 text-emerald-300 px-3 py-2 rounded border border-emerald-900/30 text-sm font-mono focus:border-emerald-500"
-                                        />
+
+                                    <div className="space-y-4">
+                                        <div>
+                                            <label className="block text-[10px] text-amber-500 uppercase font-bold mb-1.5">Max Move (Points)</label>
+                                            <input
+                                                type="number" step="0.25"
+                                                value={formData.maxMove}
+                                                onChange={(e) => setFormData(p => ({ ...p, maxMove: e.target.value }))}
+                                                className="w-full bg-slate-800 text-amber-100 px-3 py-2.5 rounded-lg border border-slate-700 text-sm focus:border-amber-500 outline-none"
+                                                placeholder="0.00"
+                                            />
+                                        </div>
                                     </div>
-                                    <div>
-                                        <label className="text-[10px] text-slate-300 block mb-1">Exit Price</label>
-                                        <input
-                                            type="number" step="0.25"
-                                            value={formData.exit} onChange={(e) => setFormData(p => ({ ...p, exit: e.target.value }))}
-                                            className="w-full bg-slate-800 text-white px-3 py-2 rounded border border-slate-500 text-sm font-mono font-bold"
-                                        />
-                                    </div>
-                                </div>
-                                <div className="mt-3 w-32">
-                                    <label className="text-[10px] text-slate-500 block mb-1">Contracts/Qty</label>
-                                    <input
-                                        type="number" step="1"
-                                        value={formData.quantity} onChange={(e) => setFormData(p => ({ ...p, quantity: e.target.value }))}
-                                        className="w-full bg-slate-800 text-slate-100 px-3 py-2 rounded border border-slate-700 text-sm"
-                                    />
                                 </div>
                             </div>
 
                             {/* Section 4: Images & Notes */}
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-4">
                                 <div>
-                                    <label className="text-[10px] uppercase text-slate-500 font-bold block mb-2">Charts & Evidence</label>
-                                    <div className="flex flex-wrap gap-2">
+                                    <label className="text-[10px] uppercase text-slate-500 font-bold block mb-3">Charts & Evidence</label>
+                                    <div className="flex flex-wrap gap-3">
                                         {formData.images.map((img, idx) => (
                                             <div key={idx} className="relative group">
                                                 <img
                                                     src={img}
-                                                    alt={`Screenshot`}
-                                                    className="w-20 h-20 object-cover rounded border border-slate-700 cursor-zoom-in"
+                                                    alt="Evidence"
+                                                    className="w-20 h-20 object-cover rounded-lg border border-slate-700 cursor-zoom-in"
                                                     onClick={() => setImageModal({ src: img, zoom: 1, x: 0, y: 0 })}
                                                 />
                                                 <button
                                                     onClick={() => removeImage(idx)}
-                                                    className="absolute -top-2 -right-2 bg-rose-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
+                                                    className="absolute -top-2 -right-2 bg-rose-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
                                                 >
                                                     ×
                                                 </button>
@@ -1066,10 +1184,10 @@ const TradingJournal = () => {
                                         ))}
                                         <button
                                             onClick={() => fileInputRef.current?.click()}
-                                            className="w-20 h-20 border-2 border-dashed border-slate-700 rounded flex flex-col items-center justify-center text-slate-500 hover:border-amber-500 hover:text-amber-500 transition-colors"
+                                            className="w-20 h-20 border-2 border-dashed border-slate-700 rounded-lg flex flex-col items-center justify-center text-slate-500 hover:border-amber-500 hover:text-amber-500 transition-all bg-slate-800/30 hover:bg-slate-800/50"
                                         >
                                             <span className="text-xl">📷</span>
-                                            <span className="text-[9px] mt-1">ADD</span>
+                                            <span className="text-[9px] mt-1 font-bold">ADD</span>
                                         </button>
                                         <input
                                             ref={fileInputRef}
@@ -1082,26 +1200,26 @@ const TradingJournal = () => {
                                     </div>
                                 </div>
                                 <div>
-                                    <label className="text-[10px] uppercase text-slate-500 font-bold block mb-2">Analysis Notes</label>
+                                    <label className="text-[10px] uppercase text-slate-500 font-bold block mb-3">Analysis Notes</label>
                                     <textarea
                                         placeholder="Psychology, execution errors, market context..."
                                         value={formData.notes}
                                         onChange={(e) => setFormData(p => ({ ...p, notes: e.target.value }))}
-                                        className="w-full bg-slate-800 text-slate-100 px-3 py-2 rounded border border-slate-700 text-sm h-24 resize-none leading-relaxed focus:border-amber-500 outline-none"
+                                        className="w-full bg-slate-800 text-slate-100 px-4 py-3 rounded-xl border border-slate-700 text-sm h-32 resize-none leading-relaxed focus:border-amber-500 outline-none transition-colors"
                                     />
                                 </div>
                             </div>
                         </div>
 
-                        <div className="p-4 border-t border-slate-800 bg-slate-800/30 flex justify-end space-x-3">
-                            <button onClick={resetForm} className="px-5 py-2.5 bg-transparent hover:bg-slate-800 text-slate-400 hover:text-white rounded transition-colors text-sm font-medium">
+                        <div className="p-5 border-t border-slate-800 bg-slate-900/90 flex justify-end gap-3">
+                            <button onClick={resetForm} className="px-6 py-2.5 bg-transparent hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-colors text-sm font-medium">
                                 Cancel
                             </button>
                             <button
                                 onClick={handleSubmit}
-                                className="px-8 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-bold rounded shadow-lg shadow-amber-500/20 transform active:scale-95 transition-all text-sm"
+                                className="px-10 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-bold rounded-lg shadow-lg shadow-amber-500/20 transform active:scale-95 transition-all text-sm"
                             >
-                                {editingEntry ? 'Update Journal Entry' : 'Log Trade'}
+                                {editingEntry ? 'Update Entry' : 'Log Trade'}
                             </button>
                         </div>
                     </div>
@@ -1109,74 +1227,65 @@ const TradingJournal = () => {
             )}
 
             {/* Image Modal */}
-            {imageModal && (
-                createPortal(
+            {imageModal && createPortal(
+                <div
+                    className="fixed inset-0 bg-black/95 z-[9999] flex items-center justify-center backdrop-blur-sm overflow-hidden"
+                    onClick={() => setImageModal(null)}
+                    onWheel={(e) => {
+                        e.stopPropagation();
+                        const delta = -e.deltaY * 0.001;
+                        setImageModal(prev => {
+                            if (!prev) return null;
+                            const newZoom = Math.min(Math.max(0.1, prev.zoom + delta), 10);
+                            return { ...prev, zoom: newZoom };
+                        });
+                    }}
+                    onMouseDown={(e) => {
+                        if (!imageModal) return;
+                        dragRef.current.isDragging = true;
+                        dragRef.current.startX = e.clientX;
+                        dragRef.current.startY = e.clientY;
+                        dragRef.current.lastX = imageModal.x;
+                        dragRef.current.lastY = imageModal.y;
+                    }}
+                    onMouseMove={(e) => {
+                        if (!imageModal || !dragRef.current.isDragging) return;
+                        e.preventDefault();
+                        const dx = e.clientX - dragRef.current.startX;
+                        const dy = e.clientY - dragRef.current.startY;
+                        const newX = dragRef.current.lastX + dx;
+                        const newY = dragRef.current.lastY + dy;
+                        setImageModal(prev => prev ? { ...prev, x: newX, y: newY } : null);
+                    }}
+                    onMouseUp={() => { dragRef.current.isDragging = false; }}
+                    onMouseLeave={() => { dragRef.current.isDragging = false; }}
+                >
                     <div
-                        className="fixed inset-0 bg-black/95 z-[9999] flex items-center justify-center backdrop-blur-sm overflow-hidden"
-                        onClick={() => setImageModal(null)}
-                        onWheel={(e) => {
-                            e.stopPropagation();
-                            // Adjust zoom sensitivity as needed.
-                            // DeltaY is usually 100 or -100 per tick. -0.001 gives a smooth zoom control.
-                            const delta = -e.deltaY * 0.001;
-                            setImageModal(prev => {
-                                if (!prev) return null;
-                                const newZoom = Math.min(Math.max(0.1, prev.zoom + delta), 10);
-                                return { ...prev, zoom: newZoom };
-                            });
-                        }}
-                        onMouseDown={(e) => {
-                            if (!imageModal) return;
-                            dragRef.current.isDragging = true;
-                            dragRef.current.startX = e.clientX;
-                            dragRef.current.startY = e.clientY;
-                            dragRef.current.lastX = imageModal.x;
-                            dragRef.current.lastY = imageModal.y;
-                        }}
-                        onMouseMove={(e) => {
-                            if (!imageModal || !dragRef.current.isDragging) return;
-                            e.preventDefault();
-                            const dx = e.clientX - dragRef.current.startX;
-                            const dy = e.clientY - dragRef.current.startY;
-                            const newX = dragRef.current.lastX + dx;
-                            const newY = dragRef.current.lastY + dy;
-
-                            // We use ref for calculation but must update state to render
-                            // To avoid too many re-renders, requestAnimationFrame could be used, but React 18 handles this decently.
-                            setImageModal(prev => prev ? { ...prev, x: newX, y: newY } : null);
-                        }}
-                        onMouseUp={() => {
-                            dragRef.current.isDragging = false;
-                        }}
-                        onMouseLeave={() => {
-                            dragRef.current.isDragging = false;
-                        }}
+                        className="relative w-full h-full flex items-center justify-center"
+                        onClick={e => e.stopPropagation()}
+                        style={{ cursor: dragRef.current.isDragging ? 'grabbing' : 'grab' }}
                     >
-                        <div
-                            className="relative w-full h-full flex items-center justify-center"
-                            onClick={e => e.stopPropagation()}
-                            style={{ cursor: dragRef.current.isDragging ? 'grabbing' : 'grab' }}
+                        <img
+                            src={imageModal.src}
+                            alt="Evidence"
+                            draggable={false}
+                            style={{
+                                transform: `translate(${imageModal.x}px, ${imageModal.y}px) scale(${imageModal.zoom})`,
+                                transition: dragRef.current.isDragging ? 'none' : 'transform 0.1s ease-out',
+                                maxWidth: 'none',
+                                maxHeight: 'none',
+                            }}
+                            className="object-contain shadow-2xl select-none"
+                        />
+                        <button
+                            onClick={() => setImageModal(null)}
+                            className="absolute top-6 right-6 w-12 h-12 bg-slate-800/50 hover:bg-rose-600 text-white rounded-full text-2xl flex items-center justify-center transition-colors z-50 shadow-lg border border-white/10"
                         >
-                            <img
-                                src={imageModal.src}
-                                alt="Full size"
-                                draggable={false}
-                                style={{
-                                    transform: `translate(${imageModal.x}px, ${imageModal.y}px) scale(${imageModal.zoom})`,
-                                    transition: dragRef.current.isDragging ? 'none' : 'transform 0.1s ease-out',
-                                    maxWidth: 'none',
-                                    maxHeight: 'none',
-                                }}
-                                className="object-contain shadow-2xl select-none"
-                            />
-                            <button
-                                onClick={() => setImageModal(null)}
-                                className="absolute top-6 right-6 w-12 h-12 bg-slate-800/50 hover:bg-rose-600 text-white rounded-full text-2xl flex items-center justify-center transition-colors z-50"
-                            >
-                                ✕
-                            </button>
-                        </div>
-                    </div>, document.body)
+                            ✕
+                        </button>
+                    </div>
+                </div>,
+                document.body
             )}
         </div>
     );
