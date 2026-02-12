@@ -32,7 +32,7 @@ interface JournalEntry {
     pnlPercent: number;
     rMultiple: number;
     result: 'WIN' | 'LOSS' | 'BREAKEVEN';
-    images: string[];
+    images: { htf: string | null, ltf: string | null, etf: string | null };
     notes: string;
 }
 
@@ -123,10 +123,8 @@ const TradingJournal = () => {
         quantity: '1',
         commissions: '1.82', // Default MES Commission
         notes: '',
-        images: [] as string[],
+        images: { htf: null, ltf: null, etf: null } as { htf: string | null, ltf: string | null, etf: string | null },
     });
-
-    const fileInputRef = useRef<HTMLInputElement>(null);
 
     // ============= Effects =============
     useEffect(() => {
@@ -221,27 +219,31 @@ const TradingJournal = () => {
 
 
     // ============= Handlers =============
-    const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const files = e.target.files;
-        if (!files) return;
+    const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'htf' | 'ltf' | 'etf') => {
+        const file = e.target.files?.[0];
+        if (!file) return;
 
-        Array.from(files).forEach(file => {
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                const base64 = event.target?.result as string;
-                setFormData(prev => ({
-                    ...prev,
-                    images: [...prev.images, base64]
-                }));
-            };
-            reader.readAsDataURL(file);
-        });
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            const base64 = event.target?.result as string;
+            setFormData(prev => ({
+                ...prev,
+                images: {
+                    ...prev.images,
+                    [type]: base64
+                }
+            }));
+        };
+        reader.readAsDataURL(file);
     };
 
-    const removeImage = (index: number) => {
+    const removeImage = (type: 'htf' | 'ltf' | 'etf') => {
         setFormData(prev => ({
             ...prev,
-            images: prev.images.filter((_, i) => i !== index)
+            images: {
+                ...prev.images,
+                [type]: null
+            }
         }));
     };
 
@@ -366,7 +368,7 @@ const TradingJournal = () => {
             quantity: '1',
             commissions: '1.82',
             notes: '',
-            images: [],
+            images: { htf: null, ltf: null, etf: null },
         });
         setShowNewEntry(false);
         setEditingEntry(null);
@@ -397,6 +399,16 @@ const TradingJournal = () => {
             }
         }
 
+        // Migration of images from legacy array
+        let images = entry.images;
+        if (Array.isArray(images)) {
+            images = {
+                htf: images[0] || null,
+                ltf: images[1] || null,
+                etf: images[2] || null
+            };
+        }
+
         setFormData({
             date: entry.date,
             time: entry.time,
@@ -414,7 +426,7 @@ const TradingJournal = () => {
             quantity: entry.quantity.toString(),
             commissions: entry.commissions?.toString() || '',
             notes: entry.notes,
-            images: entry.images,
+            images: images as any,
         });
         setEditingEntry(entry);
         setShowNewEntry(true);
@@ -494,7 +506,7 @@ const TradingJournal = () => {
                 <div className="flex items-center space-x-3">
                     <span className="text-3xl">📊</span>
                     <div>
-                        <h2 className="text-2xl font-bold text-white">Trading Journal</h2>
+                        <h2 className="text-2xl font-bold text-white">Trading Journal <span className="text-amber-500 text-sm">(v2.0)</span></h2>
                         <p className="text-xs text-slate-500">Track executions, analyze setups, master your edge</p>
                     </div>
                 </div>
@@ -645,12 +657,15 @@ const TradingJournal = () => {
                                                     {entry.pnl >= 0 ? '+' : ''}${entry.pnl.toLocaleString()}
                                                 </td>
                                                 <td className="p-3 text-center">
-                                                    {entry.images.length > 0 ? (
+                                                    {(entry.images.htf || entry.images.ltf || entry.images.etf) ? (
                                                         <button
-                                                            onClick={() => setImageModal({ src: entry.images[0], zoom: 1, x: 0, y: 0 })}
+                                                            onClick={() => setImageModal({ src: (entry.images.htf || entry.images.ltf || entry.images.etf)!, zoom: 1, x: 0, y: 0 })}
                                                             className="text-amber-400 hover:text-amber-300 transition-colors"
                                                         >
                                                             🖼️
+                                                            <span className="text-[8px] ml-0.5 opacity-60">
+                                                                {[entry.images.htf, entry.images.ltf, entry.images.etf].filter(Boolean).length}
+                                                            </span>
                                                         </button>
                                                     ) : <span className="text-slate-700">-</span>}
                                                 </td>
@@ -1243,39 +1258,94 @@ const TradingJournal = () => {
                             {/* Section 4: Images & Notes */}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-4">
                                 <div>
-                                    <label className="text-[10px] uppercase text-slate-500 font-bold block mb-3">Charts & Evidence</label>
-                                    <div className="flex flex-wrap gap-3">
-                                        {formData.images.map((img, idx) => (
-                                            <div key={idx} className="relative group">
-                                                <img
-                                                    src={img}
-                                                    alt="Evidence"
-                                                    className="w-20 h-20 object-cover rounded-lg border border-slate-700 cursor-zoom-in"
-                                                    onClick={() => setImageModal({ src: img, zoom: 1, x: 0, y: 0 })}
-                                                />
-                                                <button
-                                                    onClick={() => removeImage(idx)}
-                                                    className="absolute -top-2 -right-2 bg-rose-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
-                                                >
-                                                    ×
-                                                </button>
-                                            </div>
-                                        ))}
-                                        <button
-                                            onClick={() => fileInputRef.current?.click()}
-                                            className="w-20 h-20 border-2 border-dashed border-slate-700 rounded-lg flex flex-col items-center justify-center text-slate-500 hover:border-amber-500 hover:text-amber-500 transition-all bg-slate-800/30 hover:bg-slate-800/50"
-                                        >
-                                            <span className="text-xl">📷</span>
-                                            <span className="text-[9px] mt-1 font-bold">ADD</span>
-                                        </button>
-                                        <input
-                                            ref={fileInputRef}
-                                            type="file"
-                                            accept="image/*"
-                                            multiple
-                                            className="hidden"
-                                            onChange={handleImageUpload}
-                                        />
+                                    <label className="text-[10px] uppercase text-slate-500 font-bold block mb-3">Charts (HTF / LTF / ETF)</label>
+                                    <div className="flex gap-3">
+                                        {/* HTF Upload */}
+                                        <div className="flex-1">
+                                            {formData.images.htf ? (
+                                                <div className="relative group w-full h-24">
+                                                    <img
+                                                        src={formData.images.htf}
+                                                        alt="HTF"
+                                                        className="w-full h-full object-cover rounded-lg border border-slate-700 cursor-zoom-in"
+                                                        onClick={() => setImageModal({ src: formData.images.htf!, zoom: 1, x: 0, y: 0 })}
+                                                    />
+                                                    <button
+                                                        onClick={() => removeImage('htf')}
+                                                        className="absolute -top-2 -right-2 bg-rose-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+                                                    >
+                                                        ×
+                                                    </button>
+                                                    <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-[10px] text-white text-center py-0.5 rounded-b-lg backdrop-blur-sm">
+                                                        HTF
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <label className="w-full h-24 border-2 border-dashed border-slate-700 rounded-lg flex flex-col items-center justify-center text-slate-500 hover:border-amber-500 hover:text-amber-500 transition-all bg-slate-800/30 hover:bg-slate-800/50 cursor-pointer">
+                                                    <span className="text-xl">📷</span>
+                                                    <span className="text-[9px] mt-1 font-bold">ADD HTF</span>
+                                                    <input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e, 'htf')} />
+                                                </label>
+                                            )}
+                                        </div>
+
+                                        {/* LTF Upload */}
+                                        <div className="flex-1">
+                                            {formData.images.ltf ? (
+                                                <div className="relative group w-full h-24">
+                                                    <img
+                                                        src={formData.images.ltf}
+                                                        alt="LTF"
+                                                        className="w-full h-full object-cover rounded-lg border border-slate-700 cursor-zoom-in"
+                                                        onClick={() => setImageModal({ src: formData.images.ltf!, zoom: 1, x: 0, y: 0 })}
+                                                    />
+                                                    <button
+                                                        onClick={() => removeImage('ltf')}
+                                                        className="absolute -top-2 -right-2 bg-rose-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+                                                    >
+                                                        ×
+                                                    </button>
+                                                    <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-[10px] text-white text-center py-0.5 rounded-b-lg backdrop-blur-sm">
+                                                        LTF
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <label className="w-full h-24 border-2 border-dashed border-slate-700 rounded-lg flex flex-col items-center justify-center text-slate-500 hover:border-amber-500 hover:text-amber-500 transition-all bg-slate-800/30 hover:bg-slate-800/50 cursor-pointer">
+                                                    <span className="text-xl">📷</span>
+                                                    <span className="text-[9px] mt-1 font-bold">ADD LTF</span>
+                                                    <input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e, 'ltf')} />
+                                                </label>
+                                            )}
+                                        </div>
+
+                                        {/* ETF Upload */}
+                                        <div className="flex-1">
+                                            {formData.images.etf ? (
+                                                <div className="relative group w-full h-24">
+                                                    <img
+                                                        src={formData.images.etf}
+                                                        alt="ETF"
+                                                        className="w-full h-full object-cover rounded-lg border border-slate-700 cursor-zoom-in"
+                                                        onClick={() => setImageModal({ src: formData.images.etf!, zoom: 1, x: 0, y: 0 })}
+                                                    />
+                                                    <button
+                                                        onClick={() => removeImage('etf')}
+                                                        className="absolute -top-2 -right-2 bg-rose-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+                                                    >
+                                                        ×
+                                                    </button>
+                                                    <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-[10px] text-white text-center py-0.5 rounded-b-lg backdrop-blur-sm">
+                                                        ETF
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <label className="w-full h-24 border-2 border-dashed border-slate-700 rounded-lg flex flex-col items-center justify-center text-slate-500 hover:border-amber-500 hover:text-amber-500 transition-all bg-slate-800/30 hover:bg-slate-800/50 cursor-pointer">
+                                                    <span className="text-xl">📷</span>
+                                                    <span className="text-[9px] mt-1 font-bold">ADD ETF</span>
+                                                    <input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e, 'etf')} />
+                                                </label>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
                                 <div>
