@@ -989,44 +989,7 @@ const TradingJournal = () => {
                         <StatCard title="Expectancy (R)" value={`${currentStats.avgR.toFixed(2)}R`} type={currentStats.avgR >= 0 ? 'win' : 'loss'} />
                     </div>
 
-                    {/* Trophy Case */}
-                    <div className="bg-slate-800/20 p-6 rounded-xl border border-slate-700/50">
-                        <h3 className="text-xl font-bold text-amber-500 mb-6 flex items-center gap-3">
-                            <span>🏆</span> Trophy Case
-                        </h3>
-                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-                            {achievements.map(ach => (
-                                <div
-                                    key={ach.id}
-                                    className={`relative group p-4 rounded-xl border flex flex-col items-center justify-center text-center transition-all duration-300 ${ach.unlocked
-                                        ? 'bg-amber-500/10 border-amber-500/40 shadow-lg shadow-amber-500/5'
-                                        : 'bg-slate-800/40 border-slate-700/50 opacity-50 grayscale'}`}
-                                >
-                                    <div className={`text-3xl mb-3 transform transition-transform group-hover:scale-110 ${ach.unlocked ? '' : 'opacity-40'}`}>
-                                        {ach.icon}
-                                    </div>
-                                    <h4 className={`text-xs font-bold mb-1 ${ach.unlocked ? 'text-amber-100' : 'text-slate-500'}`}>
-                                        {ach.title}
-                                    </h4>
-                                    <p className="text-[9px] text-slate-400 leading-tight px-1">
-                                        {ach.description}
-                                    </p>
-                                    {ach.unlocked && ach.date && (
-                                        <div className="mt-3 text-[8px] font-mono text-amber-500/60 uppercase tracking-widest">
-                                            {new Date(ach.date).toLocaleDateString()}
-                                        </div>
-                                    )}
 
-                                    {/* Lock Icon for Locked items */}
-                                    {!ach.unlocked && (
-                                        <div className="absolute top-2 right-2 text-slate-600">
-                                            🔒
-                                        </div>
-                                    )}
-                                </div>
-                            ))}
-                        </div>
-                    </div>
 
                     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                         <StatCard title="Total Trades" value={currentStats.totalTrades.toString()} />
