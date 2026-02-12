@@ -191,23 +191,28 @@ const TradingJournal = () => {
         // 2. Filter by Criteria
         if (filterCriteria.length > 0) {
             filtered = filtered.filter(e => {
-                const tradeCriteriaFlat = [
-                    ...(e.criteriaUsed?.htf || []),
-                    ...(e.criteriaUsed?.ltf || []),
-                    ...(e.criteriaUsed?.etf || [])
-                ];
+                // Parse filter criteria into category:name pairs
+                const parsedFilters = filterCriteria.map(fc => {
+                    const [cat, ...nameParts] = fc.split(':');
+                    return { cat: cat as keyof JournalEntry['criteriaUsed'], name: nameParts.join(':') };
+                });
 
                 // If in "By Setup" tab, we want EXACT set match for isolation analysis
                 if (activeSubTab === 'setupStats') {
-                    if (tradeCriteriaFlat.length !== filterCriteria.length) return false;
-                    return filterCriteria.every(c =>
-                        tradeCriteriaFlat.some(ec => ec.trim().toLowerCase() === c.trim().toLowerCase())
+                    const totalTradeCriteriaCount = (e.criteriaUsed?.htf?.length || 0) +
+                        (e.criteriaUsed?.ltf?.length || 0) +
+                        (e.criteriaUsed?.etf?.length || 0);
+
+                    if (totalTradeCriteriaCount !== filterCriteria.length) return false;
+
+                    return parsedFilters.every(f =>
+                        (e.criteriaUsed[f.cat] || []).some(ec => ec.trim().toLowerCase() === f.name.trim().toLowerCase())
                     );
                 }
 
                 // Otherwise (History tab / Global Filter), default to "Contains All" logic
-                return filterCriteria.every(c =>
-                    tradeCriteriaFlat.some(ec => ec.trim().toLowerCase() === c.trim().toLowerCase())
+                return parsedFilters.every(f =>
+                    (e.criteriaUsed[f.cat] || []).some(ec => ec.trim().toLowerCase() === f.name.trim().toLowerCase())
                 );
             });
         }
@@ -636,7 +641,7 @@ const TradingJournal = () => {
                 <div className="flex items-center space-x-3">
                     <span className="text-3xl">📊</span>
                     <div>
-                        <h2 className="text-2xl font-bold text-white">Trading Journal <span className="text-amber-500 text-sm">(v2.4.1)</span></h2>
+                        <h2 className="text-2xl font-bold text-white">Trading Journal <span className="text-amber-500 text-sm">(v2.4.2)</span></h2>
                         <p className="text-xs text-slate-500">Track executions, analyze setups, master your edge</p>
                     </div>
                 </div>
@@ -711,21 +716,24 @@ const TradingJournal = () => {
                             <div className="flex flex-wrap gap-2">
                                 {filterSetup !== 'all' ? (
                                     (['htf', 'ltf', 'etf'] as const).map(cat => (
-                                        (getSetupById(filterSetup)?.criteria[cat] || []).map(c => (
-                                            <button
-                                                key={`${cat}_${c}`}
-                                                onClick={() => setFilterCriteria(prev =>
-                                                    prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c]
-                                                )}
-                                                className={`px-2 py-0.5 text-[9px] rounded border transition-colors flex items-center gap-1 ${filterCriteria.includes(c)
-                                                    ? 'bg-amber-500/20 text-amber-400 border-amber-500/50'
-                                                    : 'bg-slate-700 text-slate-400 border-slate-600 hover:border-slate-500'
-                                                    }`}
-                                            >
-                                                <span className="opacity-40 text-[7px] uppercase">{cat}</span>
-                                                {c}
-                                            </button>
-                                        ))
+                                        (getSetupById(filterSetup)?.criteria[cat] || []).map(c => {
+                                            const scopedKey = `${cat}:${c}`;
+                                            return (
+                                                <button
+                                                    key={`${cat}_${c}`}
+                                                    onClick={() => setFilterCriteria(prev =>
+                                                        prev.includes(scopedKey) ? prev.filter(x => x !== scopedKey) : [...prev, scopedKey]
+                                                    )}
+                                                    className={`px-2 py-0.5 text-[9px] rounded border transition-colors flex items-center gap-1 ${filterCriteria.includes(scopedKey)
+                                                        ? 'bg-amber-500/20 text-amber-400 border-amber-500/50'
+                                                        : 'bg-slate-700 text-slate-400 border-slate-600 hover:border-slate-500'
+                                                        }`}
+                                                >
+                                                    <span className="opacity-40 text-[7px] uppercase">{cat}</span>
+                                                    {c}
+                                                </button>
+                                            )
+                                        })
                                     ))
                                 ) : (
                                     <span className="text-xs text-slate-600 italic">Select a setup to filter by criteria</span>
@@ -949,20 +957,21 @@ const TradingJournal = () => {
                                                         return <div className="text-xs text-slate-600 italic">No criteria found in trades for this setup yet.</div>;
                                                     }
 
-                                                    const renderGroup = (label: string, items: string[], colorClass: string) => {
+                                                    const renderGroup = (label: string, items: string[], colorClass: string, cat: string) => {
                                                         if (items.length === 0) return null;
                                                         return (
                                                             <div className="space-y-2">
                                                                 <div className={`text-[9px] font-bold uppercase ${colorClass} opacity-60 tracking-widest`}>{label}</div>
                                                                 <div className="flex flex-wrap gap-2">
                                                                     {items.map(c => {
-                                                                        const isActive = filterCriteria.includes(c);
+                                                                        const scopedKey = `${cat}:${c}`;
+                                                                        const isActive = filterCriteria.includes(scopedKey);
                                                                         return (
                                                                             <button
-                                                                                key={c}
+                                                                                key={scopedKey}
                                                                                 type="button"
                                                                                 onClick={() => setFilterCriteria(prev =>
-                                                                                    isActive ? prev.filter(x => x !== c) : [...prev, c]
+                                                                                    isActive ? prev.filter(x => x !== scopedKey) : [...prev, scopedKey]
                                                                                 )}
                                                                                 className={`px-3 py-1.5 text-xs rounded-lg border transition-all ${isActive
                                                                                     ? 'bg-amber-500/20 text-amber-400 border-amber-500/50 shadow-sm shadow-amber-900/20'
@@ -980,9 +989,9 @@ const TradingJournal = () => {
 
                                                     return (
                                                         <>
-                                                            {renderGroup('High Timeframe (HTF)', harvested.htf, 'text-blue-400')}
-                                                            {renderGroup('Internal Timeframe (LTF)', harvested.ltf, 'text-purple-400')}
-                                                            {renderGroup('Entry Timeframe (ETF)', harvested.etf, 'text-emerald-400')}
+                                                            {renderGroup('High Timeframe (HTF)', harvested.htf, 'text-blue-400', 'htf')}
+                                                            {renderGroup('Internal Timeframe (LTF)', harvested.ltf, 'text-purple-400', 'ltf')}
+                                                            {renderGroup('Entry Timeframe (ETF)', harvested.etf, 'text-emerald-400', 'etf')}
                                                         </>
                                                     );
                                                 })()}
