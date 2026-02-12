@@ -174,20 +174,26 @@ const TradingJournal = () => {
 
         // 2. Filter by Criteria
         if (filterCriteria.length > 0) {
-            console.log('Filtering by criteria:', filterCriteria);
             filtered = filtered.filter(e => {
-                const hasAll = filterCriteria.every(c =>
-                    e.criteriaUsed?.some(ec => ec.trim().toLowerCase() === c.trim().toLowerCase())
+                const criteria = e.criteriaUsed || [];
+
+                // If in "By Setup" tab, we want EXACT set match for isolation analysis
+                if (activeSubTab === 'setupStats') {
+                    if (criteria.length !== filterCriteria.length) return false;
+                    return filterCriteria.every(c =>
+                        criteria.some(ec => ec.trim().toLowerCase() === c.trim().toLowerCase())
+                    );
+                }
+
+                // Otherwise (History tab / Global Filter), default to "Contains All" logic
+                return filterCriteria.every(c =>
+                    criteria.some(ec => ec.trim().toLowerCase() === c.trim().toLowerCase())
                 );
-                // Debug individual entry check
-                // if (!hasAll) console.log(`Entry ${e.id} excluded. Has: ${e.criteriaUsed}`);
-                return hasAll;
             });
         }
 
-        console.log(`Filtered count: ${filtered.length} (Setup: ${filterSetup}, Criteria: ${filterCriteria.length})`);
         return filtered;
-    }, [entries, filterSetup, filterCriteria]);
+    }, [entries, filterSetup, filterCriteria, activeSubTab]);
 
     const [currentStats, setCurrentStats] = useState(() => calculateStats(entries));
 
@@ -512,7 +518,7 @@ const TradingJournal = () => {
                 <div className="flex items-center space-x-3">
                     <span className="text-3xl">📊</span>
                     <div>
-                        <h2 className="text-2xl font-bold text-white">Trading Journal <span className="text-amber-500 text-sm">(v2.1)</span></h2>
+                        <h2 className="text-2xl font-bold text-white">Trading Journal <span className="text-amber-500 text-sm">(v2.2)</span></h2>
                         <p className="text-xs text-slate-500">Track executions, analyze setups, master your edge</p>
                     </div>
                 </div>
@@ -836,8 +842,8 @@ const TradingJournal = () => {
                                             </div>
                                         </div>
                                         <div className="mt-2 flex justify-between items-center">
-                                            <div className="text-[10px] text-slate-600 italic">
-                                                * Selecting multiple variables uses "AND" logic (trade must contain ALL selected)
+                                            <div className="text-[10px] text-amber-500/70 italic font-bold">
+                                                * Isolation Mode: Trade must match selected variables EXACTLY.
                                             </div>
                                             <div className="text-[10px] text-slate-500 text-right">
                                                 Analyzing {filteredEntries.length} of {entries.filter(e => e.setupId === filterSetup).length} trades
