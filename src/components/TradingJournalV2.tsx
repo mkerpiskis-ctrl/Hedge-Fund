@@ -285,23 +285,32 @@ const TradingJournal = () => {
         // 3. Filter by Date Range
         if (dateFilter !== 'all') {
             const now = new Date();
-            const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+            // Get local YYYY-MM-DD
+            const y = now.getFullYear();
+            const m = String(now.getMonth() + 1).padStart(2, '0');
+            const d = String(now.getDate()).padStart(2, '0');
+            const localTodayStr = `${y}-${m}-${d}`;
+
+            // Helper to parse "YYYY-MM-DD" as local midnight
+            const parseLocalMidnight = (dateStr: string) => {
+                const [y, m, d] = dateStr.split('-').map(Number);
+                return new Date(y, m - 1, d).getTime();
+            };
 
             // Start of Week (Monday)
-            const dayOfWeek = now.getDay(); // 0 is Sunday
-            const dayDiff = now.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
-            const startOfWeekDate = new Date(now.getFullYear(), now.getMonth(), dayDiff);
-            startOfWeekDate.setHours(0, 0, 0, 0);
-            const startOfWeek = startOfWeekDate.getTime();
+            const currentDay = now.getDay();
+            const diff = now.getDate() - currentDay + (currentDay === 0 ? -6 : 1);
+            const startOfWeek = new Date(now.getFullYear(), now.getMonth(), diff).getTime();
 
             // Start of Month
             const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
 
             filtered = filtered.filter(e => {
-                const entryDate = new Date(e.date).getTime();
-                if (dateFilter === 'today') return entryDate >= today;
-                if (dateFilter === 'wtd') return entryDate >= startOfWeek;
-                if (dateFilter === 'mtd') return entryDate >= startOfMonth;
+                if (dateFilter === 'today') return e.date === localTodayStr;
+
+                const entryTimestamp = parseLocalMidnight(e.date);
+                if (dateFilter === 'wtd') return entryTimestamp >= startOfWeek;
+                if (dateFilter === 'mtd') return entryTimestamp >= startOfMonth;
                 return true;
             });
         }
