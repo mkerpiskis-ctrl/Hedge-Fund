@@ -5,7 +5,7 @@ import EmpireDashboard from './components/EmpireDashboard';
 import AllWeatherCalculator from './components/AllWeatherCalculator';
 import FireTracker from './components/FireTracker';
 import IBKRTracker from './components/IBKRTracker';
-import TradingJournal from './components/TradingJournal';
+import TradingJournalV2 from './components/TradingJournalV2';
 
 function App() {
   const [session, setSession] = useState<any>(null);
@@ -199,7 +199,7 @@ function App() {
         {activeTab === 'tradingJournal' && (
           <div className="animate-fade-in">
             <div className="premium-card p-6 h-full bg-slate-900/80 backdrop-blur-sm">
-              <TradingJournal />
+              <TradingJournalV2 />
             </div>
           </div>
         )}
