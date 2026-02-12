@@ -92,6 +92,7 @@ const TradingJournal = () => {
     // Filters
     const [filterSetup, setFilterSetup] = useState<string>('all');
     const [filterCriteria, setFilterCriteria] = useState<string[]>([]);
+    const [showBaseline, setShowBaseline] = useState(false);
 
     // UI State
     const [showNewEntry, setShowNewEntry] = useState(false);
@@ -227,6 +228,86 @@ const TradingJournal = () => {
             else hours[hour].losses += 1;
         });
         return Object.values(hours).sort((a, b) => a.hour.localeCompare(b.hour));
+    }, [filteredEntries]);
+
+    // Baseline Stats for Comparison
+    const setupBaselineStats = useMemo(() => {
+        if (filterSetup === 'all') return null;
+        return calculateStats(entries.filter(e => e.setupId === filterSetup));
+    }, [entries, filterSetup, calculateStats]);
+
+    // NEW: Advanced Analytics Logic (v2.3)
+    const setupAnalytics = useMemo(() => {
+        if (filteredEntries.length === 0) return null;
+
+        // 1. Session Performance
+        const sessions = {
+            LON: { name: 'London', pnl: 0, total: 0, wins: 0 },
+            NY: { name: 'New York', pnl: 0, total: 0, wins: 0 }
+        };
+
+        filteredEntries.forEach(e => {
+            const time = parseInt(e.time.replace(':', ''));
+            // London: 03:00 (0300) to 11:30 (1130)
+            if (time >= 300 && time <= 1130) {
+                sessions.LON.total++;
+                sessions.LON.pnl += e.pnl;
+                if (e.result === 'WIN') sessions.LON.wins++;
+            }
+            // NY: 08:30 (0830) to 17:00 (1700)
+            if (time >= 830 && time <= 1700) {
+                sessions.NY.total++;
+                sessions.NY.pnl += e.pnl;
+                if (e.result === 'WIN') sessions.NY.wins++;
+            }
+        });
+
+        // 2. MFE Optimization Engine
+        const optimizationData = [];
+        for (let targetR = 0.5; targetR <= 10.0; targetR += 0.5) {
+            let simulatedWins = 0;
+            let simulatedLosses = 0;
+            let simulatedBreakevens = 0;
+
+            filteredEntries.forEach(e => {
+                const risk = Math.abs(e.entry - e.stopLoss);
+                if (risk === 0) return;
+
+                const mfePrice = e.mfePrice || (e.result === 'WIN' ? e.exit : e.entry);
+                const favorableMove = e.direction === 'Long'
+                    ? Math.max(0, mfePrice - e.entry)
+                    : Math.max(0, e.entry - mfePrice);
+
+                const actualMfeR = favorableMove / risk;
+
+                if (actualMfeR >= targetR) {
+                    simulatedWins++;
+                } else if (e.result === 'LOSS' || actualMfeR < 0.2) { // Heuristic for loss
+                    simulatedLosses++;
+                } else {
+                    simulatedBreakevens++;
+                }
+            });
+
+            const total = simulatedWins + simulatedLosses + simulatedBreakevens;
+            if (total > 0) {
+                const winRate = (simulatedWins / total) * 100;
+                // Expectancy: (WR * Reward) - (LR * 1)
+                const expectancy = (simulatedWins / total * targetR) - (simulatedLosses / total * 1);
+                optimizationData.push({ targetR, winRate, expectancy });
+            }
+        }
+
+        const bestEdge = [...optimizationData].sort((a, b) => b.expectancy - a.expectancy)[0];
+
+        // 3. Frequency Analysis
+        const dates = Array.from(new Set(filteredEntries.map(e => e.date)));
+        const firstDate = new Date(Math.min(...dates.map(d => new Date(d).getTime())));
+        const lastDate = new Date(Math.max(...dates.map(d => new Date(d).getTime())));
+        const weeks = Math.max(1, Math.ceil((lastDate.getTime() - firstDate.getTime()) / (7 * 24 * 60 * 60 * 1000)));
+        const tradesPerWeek = filteredEntries.length / weeks;
+
+        return { sessions, bestEdge, tradesPerWeek, totalWeeks: weeks };
     }, [filteredEntries]);
 
 
@@ -518,7 +599,7 @@ const TradingJournal = () => {
                 <div className="flex items-center space-x-3">
                     <span className="text-3xl">📊</span>
                     <div>
-                        <h2 className="text-2xl font-bold text-white">Trading Journal <span className="text-amber-500 text-sm">(v2.2)</span></h2>
+                        <h2 className="text-2xl font-bold text-white">Trading Journal <span className="text-amber-500 text-sm">(v2.3)</span></h2>
                         <p className="text-xs text-slate-500">Track executions, analyze setups, master your edge</p>
                     </div>
                 </div>
@@ -863,10 +944,122 @@ const TradingJournal = () => {
                                         <div className="space-y-6 animate-fade-in">
                                             {/* Setup Stats Grid */}
                                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                                <StatCard title="Setup Win Rate" value={`${currentStats.winRate.toFixed(1)}%`} type={currentStats.winRate >= 50 ? 'win' : 'loss'} />
-                                                <StatCard title="Setup P&L" value={`$${currentStats.totalPnl.toLocaleString()}`} type={currentStats.totalPnl >= 0 ? 'win' : 'loss'} />
-                                                <StatCard title="Avg R" value={`${currentStats.avgR.toFixed(2)} R`} type={currentStats.avgR > 0 ? 'win' : 'loss'} />
-                                                <StatCard title="Profit Factor" value={currentStats.profitFactor.toFixed(2)} />
+                                                <StatCard
+                                                    title="Setup Win Rate"
+                                                    value={`${currentStats.winRate.toFixed(1)}%`}
+                                                    type={currentStats.winRate >= 50 ? 'win' : 'loss'}
+                                                    subtext={showBaseline && setupBaselineStats ? `vs ${setupBaselineStats.winRate.toFixed(1)}% (Global)` : undefined}
+                                                />
+                                                <StatCard
+                                                    title="Setup P&L"
+                                                    value={`$${currentStats.totalPnl.toLocaleString()}`}
+                                                    type={currentStats.totalPnl >= 0 ? 'win' : 'loss'}
+                                                    subtext={showBaseline && setupBaselineStats ? `vs $${setupBaselineStats.totalPnl.toLocaleString()} (Global)` : undefined}
+                                                />
+                                                <StatCard
+                                                    title="Avg R"
+                                                    value={`${currentStats.avgR.toFixed(2)} R`}
+                                                    type={currentStats.avgR > 0 ? 'win' : 'loss'}
+                                                    subtext={showBaseline && setupBaselineStats ? `vs ${setupBaselineStats.avgR.toFixed(2)} R (Global)` : undefined}
+                                                />
+                                                <StatCard
+                                                    title="Profit Factor"
+                                                    value={currentStats.profitFactor.toFixed(2)}
+                                                    subtext={showBaseline && setupBaselineStats ? `vs ${setupBaselineStats.profitFactor.toFixed(2)} (Global)` : undefined}
+                                                />
+                                            </div>
+
+                                            {/* Advanced Insights Cards */}
+                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                                {/* 1. MFE Optimization */}
+                                                <div className="bg-slate-800/40 p-5 rounded-xl border border-amber-500/20 shadow-lg shadow-amber-900/5">
+                                                    <h4 className="text-xs font-bold text-amber-500 uppercase mb-3 flex items-center gap-2">
+                                                        <span>🎯</span> Edge Optimization (MFE)
+                                                    </h4>
+                                                    {setupAnalytics?.bestEdge ? (
+                                                        <div className="space-y-3">
+                                                            <div>
+                                                                <div className="text-2xl font-bold text-white">{setupAnalytics.bestEdge.targetR.toFixed(1)} : 1</div>
+                                                                <div className="text-[10px] text-slate-500 uppercase font-bold">Suggested Target R:R</div>
+                                                            </div>
+                                                            <div className="flex items-center gap-4 border-t border-slate-700/50 pt-3">
+                                                                <div>
+                                                                    <div className="text-lg font-bold text-amber-400">{setupAnalytics.bestEdge.winRate.toFixed(1)}%</div>
+                                                                    <div className="text-[9px] text-slate-500 uppercase">Win Rate at this R</div>
+                                                                </div>
+                                                                <div>
+                                                                    <div className="text-lg font-bold text-emerald-400">{setupAnalytics.bestEdge.expectancy.toFixed(2)}R</div>
+                                                                    <div className="text-[9px] text-slate-500 uppercase">Exp. Per Trade</div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="text-xs text-slate-500 italic py-4">Not enough MFE data to optimize.</div>
+                                                    )}
+                                                </div>
+
+                                                {/* 2. Session Performance */}
+                                                <div className="bg-slate-800/40 p-5 rounded-xl border border-slate-700">
+                                                    <h4 className="text-xs font-bold text-slate-500 uppercase mb-3 flex items-center gap-2">
+                                                        <span>🌐</span> Session Performance
+                                                    </h4>
+                                                    <div className="space-y-4">
+                                                        {['LON', 'NY'].map(sessKey => {
+                                                            const s = setupAnalytics?.sessions[sessKey as 'LON' | 'NY'];
+                                                            const wr = s?.total ? (s.wins / s.total * 100) : 0;
+                                                            return (
+                                                                <div key={sessKey} className="flex items-center justify-between">
+                                                                    <div>
+                                                                        <div className="text-sm font-bold text-slate-200">{s?.name}</div>
+                                                                        <div className="text-[9px] text-slate-500">{s?.total} Trades</div>
+                                                                    </div>
+                                                                    <div className="text-right">
+                                                                        <div className={`text-sm font-bold ${wr >= 50 ? 'text-emerald-400' : 'text-slate-400'}`}>{wr.toFixed(1)}% WR</div>
+                                                                        <div className={`text-[9px] font-bold ${s && s.pnl >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                                                                            {s && s.pnl >= 0 ? '+' : ''}${s?.pnl.toLocaleString()}
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+
+                                                {/* 3. Frequency & Time */}
+                                                <div className="bg-slate-800/40 p-5 rounded-xl border border-slate-700">
+                                                    <h4 className="text-xs font-bold text-slate-500 uppercase mb-3 flex items-center gap-2">
+                                                        <span>⚡</span> Trade Frequency
+                                                    </h4>
+                                                    <div className="space-y-4">
+                                                        <div>
+                                                            <div className="text-2xl font-bold text-white">{setupAnalytics?.tradesPerWeek.toFixed(1)}</div>
+                                                            <div className="text-[10px] text-slate-500 uppercase font-bold">Avg Trades Per Week</div>
+                                                        </div>
+                                                        <div className="border-t border-slate-700/50 pt-3">
+                                                            <div className="text-sm font-bold text-slate-200 uppercase">Peak Activity</div>
+                                                            <div className="text-[10px] text-slate-400">
+                                                                {timeOfDayData.length > 0
+                                                                    ? `Most active at ${[...timeOfDayData].sort((a, b) => b.total - a.total)[0].hour}`
+                                                                    : 'No time data available'
+                                                                }
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* Baseline Toggle */}
+                                            <div className="flex items-center space-x-3 bg-slate-800/20 p-3 rounded-lg border border-slate-800">
+                                                <input
+                                                    type="checkbox"
+                                                    id="compareBaseline"
+                                                    checked={showBaseline}
+                                                    onChange={(e) => setShowBaseline(e.target.checked)}
+                                                    className="w-4 h-4 rounded border-slate-700 bg-slate-800 text-amber-500 focus:ring-amber-500/50"
+                                                />
+                                                <label htmlFor="compareBaseline" className="text-xs text-slate-400 cursor-pointer select-none">
+                                                    Compare with **Setup Global Baseline** (Includes all trades for this setup)
+                                                </label>
                                             </div>
 
                                             {/* Setup Performance Graph Placeholder or Additional Insights */}
@@ -876,6 +1069,11 @@ const TradingJournal = () => {
                                                     <div className="text-3xl font-light text-white">
                                                         {((currentStats.winRate / 100 * currentStats.avgWinR) - ((1 - currentStats.winRate / 100) * Math.abs(currentStats.avgLossR))).toFixed(2)}R
                                                     </div>
+                                                    {showBaseline && setupBaselineStats && (
+                                                        <div className="text-[10px] text-slate-500 mt-1">
+                                                            Baseline: {((setupBaselineStats.winRate / 100 * setupBaselineStats.avgWinR) - ((1 - setupBaselineStats.winRate / 100) * Math.abs(setupBaselineStats.avgLossR))).toFixed(2)}R
+                                                        </div>
+                                                    )}
                                                     <div className="text-[10px] text-slate-500 mt-1">Expected return per trade</div>
                                                 </div>
                                                 <div className="bg-slate-800/30 p-4 rounded-lg border border-slate-700">
