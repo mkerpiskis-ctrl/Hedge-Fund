@@ -72,6 +72,7 @@ const TradingJournal = () => {
         const saved = localStorage.getItem('tradingJournalEntries');
         if (!saved) return [];
         const parsed = JSON.parse(saved);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         return parsed.map((e: any) => {
             if (Array.isArray(e.criteriaUsed)) {
                 return { ...e, criteriaUsed: { htf: e.criteriaUsed, ltf: [], etf: [] } };
@@ -84,6 +85,7 @@ const TradingJournal = () => {
         const saved = localStorage.getItem('tradingJournalSetups');
         if (!saved) return DEFAULT_SETUPS;
         const parsed = JSON.parse(saved);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         return parsed.map((s: any) => {
             if (Array.isArray(s.criteria)) {
                 return { ...s, criteria: { htf: s.criteria, ltf: [], etf: [] } };
@@ -504,8 +506,9 @@ const TradingJournal = () => {
 
         // Migration of mfePrice from legacy maxMove (points)
         let mfePrice = entry.mfePrice?.toString() || '';
-        if (!mfePrice && (entry as any).maxMove) {
-            const points = parseFloat((entry as any).maxMove);
+        const legacyEntry = entry as unknown as { maxMove?: string | number };
+        if (!mfePrice && legacyEntry.maxMove) {
+            const points = parseFloat(legacyEntry.maxMove.toString());
             if (!isNaN(points) && points !== 0) {
                 const entryPrice = entry.entry;
                 if (direction === 'Long') {
@@ -517,19 +520,25 @@ const TradingJournal = () => {
         }
 
         // Migration of images from legacy array
-        let images = entry.images;
-        if (Array.isArray(images)) {
+        let images: JournalEntry['images'] = { htf: null, ltf: null, etf: null };
+        const entryImages = entry.images as unknown as (JournalEntry['images'] | string[]);
+        if (Array.isArray(entryImages)) {
             images = {
-                htf: images[0] || null,
-                ltf: images[1] || null,
-                etf: images[2] || null
-            } as any;
+                htf: entryImages[0] || null,
+                ltf: entryImages[1] || null,
+                etf: entryImages[2] || null
+            };
+        } else if (entryImages) {
+            images = entryImages;
         }
 
         // Migration of criteriaUsed from legacy array
-        let criteriaUsed = entry.criteriaUsed;
-        if (Array.isArray(criteriaUsed)) {
-            criteriaUsed = { htf: criteriaUsed, ltf: [], etf: [] };
+        let criteriaUsed: JournalEntry['criteriaUsed'] = { htf: [], ltf: [], etf: [] };
+        const entryCriteria = entry.criteriaUsed as unknown as (JournalEntry['criteriaUsed'] | string[]);
+        if (Array.isArray(entryCriteria)) {
+            criteriaUsed = { htf: entryCriteria, ltf: [], etf: [] };
+        } else if (entryCriteria) {
+            criteriaUsed = entryCriteria;
         }
 
         setFormData({
@@ -540,7 +549,7 @@ const TradingJournal = () => {
             tickValue: entry.tickValue?.toString() || '1.25',
             tickSize: entry.tickSize?.toString() || '0.25',
             setupId: entry.setupId,
-            criteriaUsed: (criteriaUsed || { htf: [], ltf: [], etf: [] }) as any,
+            criteriaUsed,
             entry: entry.entry.toString(),
             exit: entry.exit.toString(),
             stopLoss: entry.stopLoss.toString(),
@@ -549,7 +558,7 @@ const TradingJournal = () => {
             quantity: entry.quantity.toString(),
             commissions: entry.commissions?.toString() || '',
             notes: entry.notes,
-            images: images as any,
+            images,
         });
         setEditingEntry(entry);
         setShowNewEntry(true);
@@ -641,7 +650,7 @@ const TradingJournal = () => {
                 <div className="flex items-center space-x-3">
                     <span className="text-3xl">📊</span>
                     <div>
-                        <h2 className="text-2xl font-bold text-white">Trading Journal <span className="text-amber-500 text-sm">(v2.4.2)</span></h2>
+                        <h2 className="text-2xl font-bold text-white">Trading Journal <span className="text-amber-500 text-sm">(v2.4.3)</span></h2>
                         <p className="text-xs text-slate-500">Track executions, analyze setups, master your edge</p>
                     </div>
                 </div>
@@ -701,7 +710,7 @@ const TradingJournal = () => {
                             <span className="text-xs text-slate-500">Setup Filter:</span>
                             <select
                                 value={filterSetup}
-                                onChange={(e) => setFilterSetup(e.target.value)}
+                                onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setFilterSetup(e.target.value)}
                                 className="bg-slate-700 text-slate-200 text-sm px-3 py-1.5 rounded border border-slate-600 outline-none focus:border-amber-500/50"
                             >
                                 <option value="all">All Setups</option>
@@ -1173,7 +1182,7 @@ const TradingJournal = () => {
                                                             <Tooltip
                                                                 contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#f8fafc' }}
                                                                 itemStyle={{ color: '#f8fafc' }}
-                                                                formatter={(value: any) => [`$${(value || 0).toFixed(2)}`, 'Equity']}
+                                                                formatter={(value?: number) => [`$${(value || 0).toFixed(2)}`, 'Equity']}
                                                             />
                                                             <Line
                                                                 type="monotone"
@@ -1627,7 +1636,7 @@ const TradingJournal = () => {
                                                             src={formData.images.htf}
                                                             alt="HTF"
                                                             className="w-full h-full object-cover rounded-lg border border-slate-700 cursor-zoom-in"
-                                                            onClick={() => setImageModal({ src: formData.images.htf!, zoom: 1, x: 0, y: 0 })}
+                                                            onClick={() => setImageModal({ src: formData.images.htf as string, zoom: 1, x: 0, y: 0 })}
                                                         />
                                                         <button
                                                             onClick={() => removeImage('htf')}
