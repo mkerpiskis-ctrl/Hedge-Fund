@@ -139,6 +139,7 @@ const TradingJournal = () => {
     // Filters
     const [filterSetup, setFilterSetup] = useState<string>('all');
     const [filterCriteria, setFilterCriteria] = useState<string[]>([]);
+    const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'wtd' | 'mtd'>('all');
     const [showBaseline, setShowBaseline] = useState(false);
 
     // UI State
@@ -267,14 +268,45 @@ const TradingJournal = () => {
 
     // Filtered entries helper (Memoized)
     const filteredEntries = useMemo(() => {
-        let filtered = entries;
+        let filtered = [...entries];
 
-        // 1. Filter by Setup
+        // 1. Sort by Date/Time Descending (Newest on Top)
+        filtered.sort((a, b) => {
+            const dateA = new Date(`${a.date}T${a.time}`).getTime();
+            const dateB = new Date(`${b.date}T${b.time}`).getTime();
+            return dateB - dateA;
+        });
+
+        // 2. Filter by Setup
         if (filterSetup !== 'all') {
             filtered = filtered.filter(e => e.setupId === filterSetup);
         }
 
-        // 2. Filter by Criteria
+        // 3. Filter by Date Range
+        if (dateFilter !== 'all') {
+            const now = new Date();
+            const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+
+            // Start of Week (Monday)
+            const dayOfWeek = now.getDay(); // 0 is Sunday
+            const dayDiff = now.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+            const startOfWeekDate = new Date(now.getFullYear(), now.getMonth(), dayDiff);
+            startOfWeekDate.setHours(0, 0, 0, 0);
+            const startOfWeek = startOfWeekDate.getTime();
+
+            // Start of Month
+            const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+
+            filtered = filtered.filter(e => {
+                const entryDate = new Date(e.date).getTime();
+                if (dateFilter === 'today') return entryDate >= today;
+                if (dateFilter === 'wtd') return entryDate >= startOfWeek;
+                if (dateFilter === 'mtd') return entryDate >= startOfMonth;
+                return true;
+            });
+        }
+
+        // 4. Filter by Criteria
         if (filterCriteria.length > 0) {
             filtered = filtered.filter(e => {
                 // Parse filter criteria into category:name pairs
@@ -304,7 +336,7 @@ const TradingJournal = () => {
         }
 
         return filtered;
-    }, [entries, filterSetup, filterCriteria, activeSubTab]);
+    }, [entries, filterSetup, filterCriteria, activeSubTab, dateFilter]);
 
     const [currentStats, setCurrentStats] = useState(() => calculateStats(entries));
 
@@ -843,6 +875,20 @@ const TradingJournal = () => {
                                 {setups.map(s => (
                                     <option key={s.id} value={s.id}>{s.name}</option>
                                 ))}
+                            </select>
+                        </div>
+
+                        <div className="flex items-center space-x-2">
+                            <span className="text-xs text-slate-500">Date Range:</span>
+                            <select
+                                value={dateFilter}
+                                onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setDateFilter(e.target.value as any)}
+                                className="bg-slate-700 text-slate-200 text-sm px-3 py-1.5 rounded border border-slate-600 outline-none focus:border-amber-500/50"
+                            >
+                                <option value="all">Unlimited</option>
+                                <option value="today">Today</option>
+                                <option value="wtd">WTD (Week)</option>
+                                <option value="mtd">MTD (Month)</option>
                             </select>
                         </div>
 
