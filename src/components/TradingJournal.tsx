@@ -6,7 +6,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 interface SetupCategory {
     id: string;
     name: string;
-    criteria: string[];
+    criteria: { htf: string[], ltf: string[], etf: string[] };
     color: string;
 }
 
@@ -19,7 +19,7 @@ interface JournalEntry {
     tickValue: number; // Value per TICK (e.g. $1.25 for MES)
     tickSize: number;  // Size of one TICK (e.g. 0.25 for MES)
     setupId: string;
-    criteriaUsed: string[];
+    criteriaUsed: { htf: string[], ltf: string[], etf: string[] };
     entry: number;
     exit: number;
     stopLoss: number;
@@ -38,21 +38,17 @@ interface JournalEntry {
 
 // Default setup categories
 const DEFAULT_SETUPS: SetupCategory[] = [
-    { id: 'pullback', name: 'Pullback', criteria: ['HTF EMA20 Price', 'HTF Trend Direction'], color: 'blue' },
-    { id: 'fakeout', name: 'Fakeout', criteria: ['HTF VWAP Price', 'LTF Volume Spike'], color: 'purple' },
-    { id: 'breakout', name: 'Breakout', criteria: ['Key Level Break', 'Volume Confirmation'], color: 'emerald' },
+    { id: 'pullback', name: 'Pullback', criteria: { htf: ['HTF EMA20 Price', 'HTF Trend Direction'], ltf: [], etf: [] }, color: 'blue' },
+    { id: 'fakeout', name: 'Fakeout', criteria: { htf: ['HTF VWAP Price'], ltf: ['LTF Volume Spike'], etf: [] }, color: 'purple' },
+    { id: 'breakout', name: 'Breakout', criteria: { htf: [], ltf: ['Key Level Break'], etf: ['Volume Confirmation'] }, color: 'emerald' },
 ];
 
 // Default global criteria
-const DEFAULT_CRITERIA = [
-    'Trend Direction',
-    'EMA 20 Context',
-    'VWAP Context',
-    'Volume Profile',
-    'Opening Range',
-    'Key Level Break',
-    'CVD Divergence',
-];
+const DEFAULT_CRITERIA = {
+    htf: ['Trend Direction', 'EMA 20 Context', 'VWAP Context', 'Volume Profile'],
+    ltf: ['Opening Range', 'Key Level Break'],
+    etf: ['CVD Divergence'],
+};
 
 // Futures Config
 const FUTURES_SYMBOLS: Record<string, { pointValue: number, commission: number }> = {
@@ -74,19 +70,38 @@ const TradingJournal = () => {
     // ============= State =============
     const [entries, setEntries] = useState<JournalEntry[]>(() => {
         const saved = localStorage.getItem('tradingJournalEntries');
-        return saved ? JSON.parse(saved) : [];
+        if (!saved) return [];
+        const parsed = JSON.parse(saved);
+        return parsed.map((e: any) => {
+            if (Array.isArray(e.criteriaUsed)) {
+                return { ...e, criteriaUsed: { htf: e.criteriaUsed, ltf: [], etf: [] } };
+            }
+            return e;
+        });
     });
 
     const [setups, setSetups] = useState<SetupCategory[]>(() => {
         const saved = localStorage.getItem('tradingJournalSetups');
-        return saved ? JSON.parse(saved) : DEFAULT_SETUPS;
+        if (!saved) return DEFAULT_SETUPS;
+        const parsed = JSON.parse(saved);
+        return parsed.map((s: any) => {
+            if (Array.isArray(s.criteria)) {
+                return { ...s, criteria: { htf: s.criteria, ltf: [], etf: [] } };
+            }
+            return s;
+        });
     });
 
     const [activeSubTab, setActiveSubTab] = useState<'history' | 'totalStats' | 'setupStats'>('history');
 
-    const [criteriaLibrary, setCriteriaLibrary] = useState<string[]>(() => {
+    const [criteriaLibrary, setCriteriaLibrary] = useState<{ htf: string[], ltf: string[], etf: string[] }>(() => {
         const saved = localStorage.getItem('tradingJournalCriteria');
-        return saved ? JSON.parse(saved) : DEFAULT_CRITERIA;
+        if (!saved) return DEFAULT_CRITERIA;
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+            return { htf: parsed, ltf: [], etf: [] };
+        }
+        return parsed;
     });
 
     // Filters
@@ -115,7 +130,7 @@ const TradingJournal = () => {
         tickValue: '1.25', // Default MES Tick Value
         tickSize: '0.25',  // Default MES Tick Size
         setupId: '',
-        criteriaUsed: [] as string[],
+        criteriaUsed: { htf: [], ltf: [], etf: [] } as { htf: string[], ltf: string[], etf: string[] },
         stopLoss: '',
         takeProfit: '',
         entry: '',
@@ -176,19 +191,23 @@ const TradingJournal = () => {
         // 2. Filter by Criteria
         if (filterCriteria.length > 0) {
             filtered = filtered.filter(e => {
-                const criteria = e.criteriaUsed || [];
+                const tradeCriteriaFlat = [
+                    ...(e.criteriaUsed?.htf || []),
+                    ...(e.criteriaUsed?.ltf || []),
+                    ...(e.criteriaUsed?.etf || [])
+                ];
 
                 // If in "By Setup" tab, we want EXACT set match for isolation analysis
                 if (activeSubTab === 'setupStats') {
-                    if (criteria.length !== filterCriteria.length) return false;
+                    if (tradeCriteriaFlat.length !== filterCriteria.length) return false;
                     return filterCriteria.every(c =>
-                        criteria.some(ec => ec.trim().toLowerCase() === c.trim().toLowerCase())
+                        tradeCriteriaFlat.some(ec => ec.trim().toLowerCase() === c.trim().toLowerCase())
                     );
                 }
 
                 // Otherwise (History tab / Global Filter), default to "Contains All" logic
                 return filterCriteria.every(c =>
-                    criteria.some(ec => ec.trim().toLowerCase() === c.trim().toLowerCase())
+                    tradeCriteriaFlat.some(ec => ec.trim().toLowerCase() === c.trim().toLowerCase())
                 );
             });
         }
@@ -452,7 +471,7 @@ const TradingJournal = () => {
             tickValue: '1.25',
             tickSize: '0.25',
             setupId: '',
-            criteriaUsed: [],
+            criteriaUsed: { htf: [], ltf: [], etf: [] },
             stopLoss: '',
             takeProfit: '',
             entry: '',
@@ -499,7 +518,13 @@ const TradingJournal = () => {
                 htf: images[0] || null,
                 ltf: images[1] || null,
                 etf: images[2] || null
-            };
+            } as any;
+        }
+
+        // Migration of criteriaUsed from legacy array
+        let criteriaUsed = entry.criteriaUsed;
+        if (Array.isArray(criteriaUsed)) {
+            criteriaUsed = { htf: criteriaUsed, ltf: [], etf: [] };
         }
 
         setFormData({
@@ -510,7 +535,7 @@ const TradingJournal = () => {
             tickValue: entry.tickValue?.toString() || '1.25',
             tickSize: entry.tickSize?.toString() || '0.25',
             setupId: entry.setupId,
-            criteriaUsed: entry.criteriaUsed,
+            criteriaUsed: (criteriaUsed || { htf: [], ltf: [], etf: [] }) as any,
             entry: entry.entry.toString(),
             exit: entry.exit.toString(),
             stopLoss: entry.stopLoss.toString(),
@@ -534,9 +559,9 @@ const TradingJournal = () => {
     const addSetup = () => {
         if (!newSetupName.trim()) return;
         const newSetup: SetupCategory = {
-            id: `setup_${Date.now()} `,
+            id: `setup_${Date.now()}`,
             name: newSetupName.trim(),
-            criteria: [],
+            criteria: { htf: [], ltf: [], etf: [] },
             color: ['blue', 'purple', 'emerald', 'amber', 'rose', 'cyan'][Math.floor(Math.random() * 6)],
         };
         setSetups(prev => [...prev, newSetup]);
@@ -547,22 +572,34 @@ const TradingJournal = () => {
         setSetups(prev => prev.filter(s => s.id !== id));
     };
 
-    const addCriteriaToSetup = (setupId: string, criteria: string) => {
+    const addCriteriaToSetup = (setupId: string, criteria: string, category: 'htf' | 'ltf' | 'etf' = 'htf') => {
         if (!criteria.trim()) return;
-        setSetups(prev => prev.map(s =>
-            s.id === setupId && !s.criteria.includes(criteria)
-                ? { ...s, criteria: [...s.criteria, criteria] }
-                : s
-        ));
+        setSetups(prev => prev.map(s => {
+            if (s.id !== setupId) return s;
+            const currentCat = s.criteria[category] || [];
+            if (currentCat.includes(criteria)) return s;
+            return {
+                ...s,
+                criteria: {
+                    ...s.criteria,
+                    [category]: [...currentCat, criteria]
+                }
+            };
+        }));
         setNewCriteria('');
     };
 
-    const removeCriteriaFromSetup = (setupId: string, criteria: string) => {
-        setSetups(prev => prev.map(s =>
-            s.id === setupId
-                ? { ...s, criteria: s.criteria.filter(c => c !== criteria) }
-                : s
-        ));
+    const removeCriteriaFromSetup = (setupId: string, criteria: string, category: 'htf' | 'ltf' | 'etf') => {
+        setSetups(prev => prev.map(s => {
+            if (s.id !== setupId) return s;
+            return {
+                ...s,
+                criteria: {
+                    ...s.criteria,
+                    [category]: (s.criteria[category] || []).filter(c => c !== criteria)
+                }
+            };
+        }));
     };
 
     const getSetupById = (id: string) => setups.find(s => s.id === id);
@@ -599,7 +636,7 @@ const TradingJournal = () => {
                 <div className="flex items-center space-x-3">
                     <span className="text-3xl">📊</span>
                     <div>
-                        <h2 className="text-2xl font-bold text-white">Trading Journal <span className="text-amber-500 text-sm">(v2.3)</span></h2>
+                        <h2 className="text-2xl font-bold text-white">Trading Journal <span className="text-amber-500 text-sm">(v2.4.1)</span></h2>
                         <p className="text-xs text-slate-500">Track executions, analyze setups, master your edge</p>
                     </div>
                 </div>
@@ -671,21 +708,26 @@ const TradingJournal = () => {
 
                         <div className="flex items-center space-x-2">
                             <span className="text-xs text-slate-500">Criteria Filter:</span>
-                            <div className="flex flex-wrap gap-1">
-                                {filterSetup !== 'all' ? getSetupById(filterSetup)?.criteria.map(c => (
-                                    <button
-                                        key={c}
-                                        onClick={() => setFilterCriteria(prev =>
-                                            prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c]
-                                        )}
-                                        className={`px-2 py-0.5 text-[10px] rounded border transition-colors ${filterCriteria.includes(c)
-                                            ? 'bg-amber-500/20 text-amber-400 border-amber-500/50'
-                                            : 'bg-slate-700 text-slate-400 border-slate-600 hover:border-slate-500'
-                                            }`}
-                                    >
-                                        {c}
-                                    </button>
-                                )) : (
+                            <div className="flex flex-wrap gap-2">
+                                {filterSetup !== 'all' ? (
+                                    (['htf', 'ltf', 'etf'] as const).map(cat => (
+                                        (getSetupById(filterSetup)?.criteria[cat] || []).map(c => (
+                                            <button
+                                                key={`${cat}_${c}`}
+                                                onClick={() => setFilterCriteria(prev =>
+                                                    prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c]
+                                                )}
+                                                className={`px-2 py-0.5 text-[9px] rounded border transition-colors flex items-center gap-1 ${filterCriteria.includes(c)
+                                                    ? 'bg-amber-500/20 text-amber-400 border-amber-500/50'
+                                                    : 'bg-slate-700 text-slate-400 border-slate-600 hover:border-slate-500'
+                                                    }`}
+                                            >
+                                                <span className="opacity-40 text-[7px] uppercase">{cat}</span>
+                                                {c}
+                                            </button>
+                                        ))
+                                    ))
+                                ) : (
                                     <span className="text-xs text-slate-600 italic">Select a setup to filter by criteria</span>
                                 )}
                             </div>
@@ -730,16 +772,20 @@ const TradingJournal = () => {
                                                     <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${getSetupColor(entry.setupId)}`}>
                                                         {getSetupById(entry.setupId)?.name || 'Unknown'}
                                                     </span>
-                                                    {entry.criteriaUsed.length > 0 && (
-                                                        <div className="flex flex-wrap gap-0.5 mt-1">
-                                                            {entry.criteriaUsed.slice(0, 2).map(c => (
-                                                                <span key={c} className="text-[9px] px-1 bg-slate-800 rounded text-slate-500">{c}</span>
-                                                            ))}
-                                                            {entry.criteriaUsed.length > 2 && (
-                                                                <span className="text-[9px] px-1 bg-slate-800 rounded text-slate-500">+{entry.criteriaUsed.length - 2}</span>
-                                                            )}
-                                                        </div>
-                                                    )}
+                                                    {(() => {
+                                                        const allCriteria = [...entry.criteriaUsed.htf, ...entry.criteriaUsed.ltf, ...entry.criteriaUsed.etf];
+                                                        if (allCriteria.length === 0) return null;
+                                                        return (
+                                                            <div className="flex flex-wrap gap-0.5 mt-1">
+                                                                {allCriteria.slice(0, 2).map(c => (
+                                                                    <span key={c} className="text-[9px] px-1 bg-slate-800 rounded text-slate-500">{c}</span>
+                                                                ))}
+                                                                {allCriteria.length > 2 && (
+                                                                    <span className="text-[9px] px-1 bg-slate-800 rounded text-slate-500">+{allCriteria.length - 2}</span>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    })()}
                                                 </td>
                                                 <td className="p-3 text-right font-mono text-xs">${entry.entry.toFixed(2)}</td>
                                                 <td className="p-3 text-right font-mono text-xs">${entry.exit.toFixed(2)}</td>
@@ -889,36 +935,56 @@ const TradingJournal = () => {
                                                     </button>
                                                 </div>
                                             </div>
-                                            <div className="flex flex-wrap gap-2">
+                                            <div className="space-y-4">
                                                 {(() => {
-                                                    const harvestedCriteria = Array.from(new Set(
-                                                        entries
-                                                            .filter(e => e.setupId === filterSetup)
-                                                            .flatMap(e => e.criteriaUsed || [])
-                                                    )).sort();
+                                                    const harvested = {
+                                                        htf: Array.from(new Set(entries.filter(e => e.setupId === filterSetup).flatMap(e => e.criteriaUsed?.htf || []))).sort(),
+                                                        ltf: Array.from(new Set(entries.filter(e => e.setupId === filterSetup).flatMap(e => e.criteriaUsed?.ltf || []))).sort(),
+                                                        etf: Array.from(new Set(entries.filter(e => e.setupId === filterSetup).flatMap(e => e.criteriaUsed?.etf || []))).sort(),
+                                                    };
 
-                                                    if (harvestedCriteria.length === 0) {
+                                                    const hasAny = harvested.htf.length + harvested.ltf.length + harvested.etf.length > 0;
+
+                                                    if (!hasAny) {
                                                         return <div className="text-xs text-slate-600 italic">No criteria found in trades for this setup yet.</div>;
                                                     }
 
-                                                    return harvestedCriteria.map(c => {
-                                                        const isActive = filterCriteria.includes(c);
+                                                    const renderGroup = (label: string, items: string[], colorClass: string) => {
+                                                        if (items.length === 0) return null;
                                                         return (
-                                                            <button
-                                                                key={c}
-                                                                type="button"
-                                                                onClick={() => setFilterCriteria(prev =>
-                                                                    isActive ? prev.filter(x => x !== c) : [...prev, c]
-                                                                )}
-                                                                className={`px-3 py-1.5 text-xs rounded-lg border transition-all ${isActive
-                                                                    ? 'bg-amber-500/20 text-amber-400 border-amber-500/50 shadow-sm shadow-amber-900/20'
-                                                                    : 'bg-slate-800 text-slate-500 border-slate-700 hover:border-slate-600 hover:text-slate-400'
-                                                                    }`}
-                                                            >
-                                                                {isActive ? '✓ ' : ''}{c}
-                                                            </button>
+                                                            <div className="space-y-2">
+                                                                <div className={`text-[9px] font-bold uppercase ${colorClass} opacity-60 tracking-widest`}>{label}</div>
+                                                                <div className="flex flex-wrap gap-2">
+                                                                    {items.map(c => {
+                                                                        const isActive = filterCriteria.includes(c);
+                                                                        return (
+                                                                            <button
+                                                                                key={c}
+                                                                                type="button"
+                                                                                onClick={() => setFilterCriteria(prev =>
+                                                                                    isActive ? prev.filter(x => x !== c) : [...prev, c]
+                                                                                )}
+                                                                                className={`px-3 py-1.5 text-xs rounded-lg border transition-all ${isActive
+                                                                                    ? 'bg-amber-500/20 text-amber-400 border-amber-500/50 shadow-sm shadow-amber-900/20'
+                                                                                    : 'bg-slate-800 text-slate-500 border-slate-700 hover:border-slate-600 hover:text-slate-400'
+                                                                                    }`}
+                                                                            >
+                                                                                {isActive ? '✓ ' : ''}{c}
+                                                                            </button>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                            </div>
                                                         );
-                                                    });
+                                                    };
+
+                                                    return (
+                                                        <>
+                                                            {renderGroup('High Timeframe (HTF)', harvested.htf, 'text-blue-400')}
+                                                            {renderGroup('Internal Timeframe (LTF)', harvested.ltf, 'text-purple-400')}
+                                                            {renderGroup('Entry Timeframe (ETF)', harvested.etf, 'text-emerald-400')}
+                                                        </>
+                                                    );
                                                 })()}
                                             </div>
                                         </div>
@@ -1144,10 +1210,10 @@ const TradingJournal = () => {
             {/* Setup Manager */}
             {showSetupManager && (
                 <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-                    <div className="bg-slate-900 rounded-xl border border-slate-700 w-full max-w-2xl max-h-[85vh] overflow-y-auto">
+                    <div className="bg-slate-900 rounded-xl border border-slate-700 w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
                         <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-800/50">
-                            <h3 className="text-lg font-bold text-white">⚙️ Setup Manager</h3>
-                            <button onClick={() => setShowSetupManager(false)} className="text-slate-400 hover:text-white">✕</button>
+                            <h3 className="text-lg font-bold text-white flex items-center gap-2">⚙️ Setup Manager</h3>
+                            <button onClick={() => setShowSetupManager(false)} className="text-slate-400 hover:text-white bg-slate-800 w-8 h-8 rounded-full flex items-center justify-center transition-colors">✕</button>
                         </div>
 
                         <div className="flex-1 overflow-y-auto p-6 space-y-10">
@@ -1155,51 +1221,68 @@ const TradingJournal = () => {
                             <div>
                                 <h4 className="text-sm font-bold text-amber-500 uppercase mb-4 flex items-center gap-2">
                                     📚 Global Criteria Library
-                                    <span className="text-[10px] font-normal text-slate-500 lowercase normal-case italic">(Criteria available for all setups)</span>
+                                    <span className="text-[10px] font-normal text-slate-500 lowercase normal-case italic">(Common variables)</span>
                                 </h4>
-                                <div className="bg-slate-800/40 p-5 rounded-xl border border-slate-700 space-y-4 shadow-inner">
+                                <div className="bg-slate-800/40 p-5 rounded-xl border border-slate-700 space-y-6 shadow-inner">
                                     <div className="flex gap-2">
                                         <input
                                             type="text"
-                                            placeholder="Add new criteria (e.g. 'RSI Divergence')"
+                                            placeholder="New criteria name..."
                                             value={newCriteria}
                                             onChange={(e) => setNewCriteria(e.target.value)}
-                                            onKeyDown={(e) => {
-                                                if (e.key === 'Enter' && newCriteria.trim()) {
-                                                    setCriteriaLibrary(prev => [...prev, newCriteria.trim()]);
-                                                    setNewCriteria('');
-                                                }
-                                            }}
-                                            className="flex-1 bg-slate-900 text-slate-100 px-4 py-2.5 rounded-lg border border-slate-700 focus:border-amber-500 outline-none transition-colors"
+                                            className="flex-1 bg-slate-900 text-slate-100 px-4 py-2.5 rounded-lg border border-slate-700 focus:border-amber-500 outline-none transition-colors text-sm"
                                         />
-                                        <button
-                                            onClick={() => {
-                                                if (!newCriteria.trim()) return;
-                                                setCriteriaLibrary(prev => [...prev, newCriteria.trim()]);
-                                                setNewCriteria('');
-                                            }}
-                                            className="px-6 py-2.5 bg-amber-600 hover:bg-amber-500 text-black font-bold rounded-lg transition-colors"
-                                        >
-                                            Add
-                                        </button>
+                                        <div className="flex gap-1">
+                                            {(['htf', 'ltf', 'etf'] as const).map(cat => (
+                                                <button
+                                                    key={cat}
+                                                    onClick={() => {
+                                                        if (!newCriteria.trim()) return;
+                                                        setCriteriaLibrary(prev => ({
+                                                            ...prev,
+                                                            [cat]: [...(prev[cat] || []), newCriteria.trim()]
+                                                        }));
+                                                        setNewCriteria('');
+                                                    }}
+                                                    className={`px-3 py-2 text-[10px] font-bold rounded uppercase transition-colors ${cat === 'htf' ? 'bg-blue-600/20 text-blue-400 hover:bg-blue-600/40' :
+                                                        cat === 'ltf' ? 'bg-purple-600/20 text-purple-400 hover:bg-purple-600/40' :
+                                                            'bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/40'
+                                                        }`}
+                                                >
+                                                    + {cat}
+                                                </button>
+                                            ))}
+                                        </div>
                                     </div>
-                                    <div className="flex flex-wrap gap-2 min-h-[40px]">
-                                        {criteriaLibrary.length === 0 ? (
-                                            <div className="text-xs text-slate-600 italic">No criteria in library. Add some above.</div>
-                                        ) : (
-                                            criteriaLibrary.map(c => (
-                                                <span key={c} className="px-3 py-1.5 bg-slate-800 text-slate-300 text-xs rounded-lg border border-slate-700 flex items-center gap-2 group hover:border-slate-500 transition-colors">
-                                                    {c}
-                                                    <button
-                                                        onClick={() => setCriteriaLibrary(prev => prev.filter(x => x !== c))}
-                                                        className="text-slate-500 hover:text-rose-400 opacity-0 group-hover:opacity-100 transition-opacity"
-                                                        title="Remove from library"
-                                                    >
-                                                        ✕
-                                                    </button>
-                                                </span>
-                                            ))
-                                        )}
+
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                        {(['htf', 'ltf', 'etf'] as const).map(cat => (
+                                            <div key={cat} className="space-y-2">
+                                                <div className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-2">
+                                                    {cat === 'htf' ? '🟦 HTF' : cat === 'ltf' ? '🟪 LTF' : '🟩 ETF'}
+                                                </div>
+                                                <div className="flex flex-wrap gap-2 min-h-[40px] p-3 bg-slate-900/50 rounded-lg border border-slate-800">
+                                                    {(criteriaLibrary[cat] || []).length === 0 ? (
+                                                        <div className="text-[9px] text-slate-700 italic">Empty</div>
+                                                    ) : (
+                                                        (criteriaLibrary[cat] || []).map(c => (
+                                                            <span key={c} className="px-2 py-1 bg-slate-800 text-slate-400 text-[10px] rounded border border-slate-700 flex items-center gap-1 group">
+                                                                {c}
+                                                                <button
+                                                                    onClick={() => setCriteriaLibrary(prev => ({
+                                                                        ...prev,
+                                                                        [cat]: prev[cat].filter(x => x !== c)
+                                                                    }))}
+                                                                    className="text-slate-600 hover:text-rose-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                                >
+                                                                    ✕
+                                                                </button>
+                                                            </span>
+                                                        ))
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ))}
                                     </div>
                                 </div>
                             </div>
@@ -1217,57 +1300,69 @@ const TradingJournal = () => {
                                         placeholder="New setup name (e.g. 'Bear Flag')"
                                         value={newSetupName}
                                         onChange={(e) => setNewSetupName(e.target.value)}
-                                        className="flex-1 bg-slate-800 text-slate-100 px-4 py-2 rounded border border-slate-700 focus:border-amber-500 outline-none"
+                                        className="flex-1 bg-slate-800 text-slate-100 px-4 py-2 rounded-lg border border-slate-700 focus:border-amber-500 outline-none text-sm"
                                     />
                                     <button
                                         onClick={addSetup}
-                                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded"
+                                        className="px-6 py-2 bg-amber-600 hover:bg-amber-500 text-black font-bold rounded-lg transition-colors text-xs"
                                     >
-                                        Add Setup
+                                        + Create Setup
                                     </button>
                                 </div>
 
-                                <div className="space-y-4">
+                                <div className="grid grid-cols-1 gap-4">
                                     {setups.map(setup => (
-                                        <div key={setup.id} className="bg-slate-800/30 p-4 rounded-lg border border-slate-700">
-                                            <div className="flex items-center justify-between mb-3">
+                                        <div key={setup.id} className="bg-slate-800/30 p-4 rounded-xl border border-slate-700">
+                                            <div className="flex items-center justify-between mb-4 border-b border-slate-800 pb-3">
                                                 <span className={`px-2 py-1 rounded text-sm font-bold border ${getSetupColor(setup.id)}`}>
                                                     {setup.name}
                                                 </span>
-                                                <button onClick={() => deleteSetup(setup.id)} className="text-slate-500 hover:text-rose-400 text-xs uppercase font-bold">Delete</button>
+                                                <button onClick={() => deleteSetup(setup.id)} className="text-slate-500 hover:text-rose-400 text-[10px] uppercase font-bold tracking-widest transition-colors">Delete</button>
                                             </div>
 
-                                            <div className="space-y-2">
-                                                <div className="flex flex-wrap gap-2">
-                                                    {setup.criteria.map(c => (
-                                                        <span key={c} className="px-2 py-1 bg-slate-700 text-slate-300 text-xs rounded flex items-center gap-1">
-                                                            {c}
-                                                            <button onClick={() => removeCriteriaFromSetup(setup.id, c)} className="hover:text-rose-400 ml-1">×</button>
-                                                        </span>
-                                                    ))}
-                                                    <button
-                                                        onClick={() => setSelectedSetupForCriteria(selectedSetupForCriteria === setup.id ? null : setup.id)}
-                                                        className="px-2 py-1 bg-slate-700/50 text-slate-400 text-xs rounded hover:bg-slate-700 border border-dashed border-slate-600"
-                                                    >
-                                                        + Add Criteria
-                                                    </button>
-                                                </div>
-
-                                                {selectedSetupForCriteria === setup.id && (
-                                                    <div className="flex gap-2 mt-2">
-                                                        <select
-                                                            value={newCriteria}
-                                                            onChange={(e) => setNewCriteria(e.target.value)}
-                                                            className="flex-1 bg-slate-800 text-slate-300 text-xs px-2 py-1 rounded border border-slate-700"
-                                                        >
-                                                            <option value="">Select criteria...</option>
-                                                            {criteriaLibrary.filter(c => !setup.criteria.includes(c)).map(c => (
-                                                                <option key={c} value={c}>{c}</option>
+                                            <div className="space-y-4">
+                                                {(['htf', 'ltf', 'etf'] as const).map(cat => (
+                                                    <div key={cat} className="space-y-2">
+                                                        <div className="text-[9px] font-bold text-slate-500 uppercase tracking-tighter flex items-center gap-2 opacity-60">
+                                                            {cat === 'htf' ? 'High Timeframe (HTF)' : cat === 'ltf' ? 'Internal Timeframe (LTF)' : 'Entry Logic (ETF)'}
+                                                        </div>
+                                                        <div className="flex flex-wrap gap-2">
+                                                            {(setup.criteria[cat] || []).map(c => (
+                                                                <span key={c} className="px-2 py-1 bg-slate-700/50 text-slate-300 text-[10px] rounded flex items-center gap-1 border border-slate-600/30 group">
+                                                                    {c}
+                                                                    <button onClick={() => removeCriteriaFromSetup(setup.id, c, cat)} className="hover:text-rose-400 ml-1 transition-colors opacity-60 group-hover:opacity-100">×</button>
+                                                                </span>
                                                             ))}
-                                                        </select>
-                                                        <button onClick={() => { addCriteriaToSetup(setup.id, newCriteria); setSelectedSetupForCriteria(null); }} className="px-3 py-1 bg-blue-600 text-white text-xs rounded">Add</button>
+                                                            <button
+                                                                onClick={() => setSelectedSetupForCriteria(selectedSetupForCriteria === `${setup.id}_${cat}` ? null : `${setup.id}_${cat}`)}
+                                                                className="px-2 py-1 bg-slate-900 border border-dashed border-slate-700 text-slate-500 text-[10px] rounded hover:border-amber-500 hover:text-amber-500 transition-colors"
+                                                            >
+                                                                + Link variable
+                                                            </button>
+                                                        </div>
+
+                                                        {selectedSetupForCriteria === `${setup.id}_${cat}` && (
+                                                            <div className="mt-2 p-3 bg-slate-900 rounded-lg border border-slate-700 shadow-xl border-amber-500/20">
+                                                                <div className="text-[9px] font-bold text-amber-500/60 uppercase mb-2">Select from {cat.toUpperCase()} Library</div>
+                                                                <div className="flex flex-wrap gap-2">
+                                                                    {(criteriaLibrary[cat] || []).filter(c => !(setup.criteria[cat] || []).includes(c)).length === 0 ? (
+                                                                        <div className="text-[10px] text-slate-600 italic px-1 text-center w-full">Library empty for this category.</div>
+                                                                    ) : (
+                                                                        (criteriaLibrary[cat] || []).filter(c => !(setup.criteria[cat] || []).includes(c)).map(c => (
+                                                                            <button
+                                                                                key={c}
+                                                                                onClick={() => addCriteriaToSetup(setup.id, c, cat)}
+                                                                                className="px-2 py-1 bg-slate-800 hover:bg-amber-600/20 text-slate-400 hover:text-amber-500 text-[10px] rounded transition-colors border border-slate-700"
+                                                                            >
+                                                                                + {c}
+                                                                            </button>
+                                                                        ))
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        )}
                                                     </div>
-                                                )}
+                                                ))}
                                             </div>
                                         </div>
                                     ))}
@@ -1279,395 +1374,422 @@ const TradingJournal = () => {
             )}
 
             {/* New Entry Form */}
-            {showNewEntry && (
-                <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-                    <div className="bg-slate-900 rounded-xl border border-slate-700 w-full max-w-3xl max-h-[95vh] flex flex-col shadow-2xl shadow-black overflow-hidden">
-                        <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900">
-                            <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                                {editingEntry ? '✏️ Edit Entry' : '📝 New Journal Entry'}
-                            </h3>
-                            <button onClick={resetForm} className="bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white w-8 h-8 rounded-full flex items-center justify-center transition-colors">✕</button>
-                        </div>
-
-                        <div className="flex-1 overflow-y-auto p-6 space-y-8">
-                            {/* Section 1: Instrument & Time */}
-                            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                                <div>
-                                    <label className="text-[10px] uppercase text-slate-500 font-bold block mb-1.5">Date</label>
-                                    <input
-                                        type="date"
-                                        value={formData.date}
-                                        onChange={(e) => setFormData(p => ({ ...p, date: e.target.value }))}
-                                        className="w-full bg-slate-800 text-slate-100 px-3 py-2 rounded focus:ring-1 focus:ring-amber-500 border border-slate-700 outline-none text-sm"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="text-[10px] uppercase text-slate-500 font-bold block mb-1.5">Time</label>
-                                    <input
-                                        type="time"
-                                        value={formData.time}
-                                        onChange={(e) => setFormData(p => ({ ...p, time: e.target.value }))}
-                                        className="w-full bg-slate-800 text-slate-100 px-3 py-2 rounded focus:ring-1 focus:ring-amber-500 border border-slate-700 outline-none text-sm"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="text-[10px] uppercase text-slate-500 font-bold block mb-1.5">Symbol</label>
-                                    <input
-                                        type="text"
-                                        list="tickers"
-                                        placeholder="MES"
-                                        value={formData.symbol}
-                                        onChange={(e) => handleSymbolChange(e.target.value)}
-                                        className="w-full bg-slate-800 text-slate-100 px-3 py-2 rounded focus:ring-1 focus:ring-amber-500 border border-slate-700 outline-none text-sm font-bold uppercase"
-                                    />
-                                    <datalist id="tickers">
-                                        {Object.keys(FUTURES_SYMBOLS).map(s => <option key={s} value={s} />)}
-                                    </datalist>
-                                </div>
-                                <div>
-                                    <label className="text-[10px] uppercase text-slate-500 font-bold block mb-1.5">Direction</label>
-                                    <div className="flex bg-slate-800 rounded p-1 border border-slate-700 h-[38px]">
-                                        <button
-                                            onClick={() => setFormData(p => ({ ...p, direction: 'Long' }))}
-                                            className={`flex-1 text-xs font-bold rounded transition-colors ${formData.direction === 'Long' ? 'bg-emerald-600 text-white' : 'text-slate-500 hover:text-slate-300'}`}
-                                        >
-                                            LONG
-                                        </button>
-                                        <button
-                                            onClick={() => setFormData(p => ({ ...p, direction: 'Short' }))}
-                                            className={`flex-1 text-xs font-bold rounded transition-colors ${formData.direction === 'Short' ? 'bg-rose-600 text-white' : 'text-slate-500 hover:text-slate-300'}`}
-                                        >
-                                            SHORT
-                                        </button>
-                                    </div>
-                                </div>
-                                <div>
-                                    <label className="text-[10px] uppercase text-slate-500 font-bold block mb-1.5 focus:text-amber-500">Tick Val ($)</label>
-                                    <input
-                                        type="number"
-                                        value={formData.tickValue}
-                                        onChange={(e) => setFormData(p => ({ ...p, tickValue: e.target.value }))}
-                                        className="w-full bg-slate-800 text-slate-100 px-3 py-2 rounded focus:ring-1 focus:ring-amber-500 border border-slate-700 outline-none text-sm"
-                                    />
-                                </div>
+            {
+                showNewEntry && (
+                    <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+                        <div className="bg-slate-900 rounded-xl border border-slate-700 w-full max-w-3xl max-h-[95vh] flex flex-col shadow-2xl shadow-black overflow-hidden">
+                            <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900">
+                                <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                                    {editingEntry ? '✏️ Edit Entry' : '📝 New Journal Entry'}
+                                </h3>
+                                <button onClick={resetForm} className="bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white w-8 h-8 rounded-full flex items-center justify-center transition-colors">✕</button>
                             </div>
 
-                            {/* Section 2: Setup Details */}
-                            <div className="bg-slate-800/20 p-5 rounded-xl border border-slate-700/50 space-y-4">
-                                <div>
-                                    <label className="text-[10px] uppercase text-slate-500 font-bold block mb-2">Strategy Setup</label>
-                                    <select
-                                        value={formData.setupId}
-                                        onChange={(e) => setFormData(p => ({ ...p, setupId: e.target.value, criteriaUsed: [] }))}
-                                        className="w-full bg-slate-800 text-slate-200 px-4 py-2.5 rounded-lg border border-slate-600 focus:border-amber-500 outline-none"
-                                    >
-                                        <option value="">Select a setup...</option>
-                                        {setups.map(s => (
-                                            <option key={s.id} value={s.id}>{s.name}</option>
-                                        ))}
-                                    </select>
-                                </div>
-
-                                {formData.setupId && (
+                            <div className="flex-1 overflow-y-auto p-6 space-y-8">
+                                {/* Section 1: Instrument & Time */}
+                                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                                     <div>
-                                        <label className="text-[10px] uppercase text-slate-500 font-bold block mb-2">Select Criteria</label>
-                                        <div className="flex flex-wrap gap-2">
-                                            {/* Combined view: show library criteria, highlight if in setup */}
-                                            {criteriaLibrary.map(c => {
-                                                const isInSetup = getSetupById(formData.setupId)?.criteria.includes(c);
-                                                const isSelected = formData.criteriaUsed.includes(c);
-                                                return (
-                                                    <button
-                                                        key={c}
-                                                        onClick={() => setFormData(p => ({
-                                                            ...p,
-                                                            criteriaUsed: isSelected
-                                                                ? p.criteriaUsed.filter(x => x !== c)
-                                                                : [...p.criteriaUsed, c]
-                                                        }))}
-                                                        className={`px-3 py-1.5 text-xs rounded-lg border transition-all flex items-center gap-1.5 ${isSelected
-                                                            ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/50 shadow-sm shadow-emerald-500/10'
-                                                            : isInSetup
-                                                                ? 'bg-slate-800/50 text-slate-300 border-amber-500/30'
-                                                                : 'bg-slate-900/50 text-slate-500 border-slate-800'
-                                                            }`}
-                                                    >
-                                                        {isSelected && <span>✓</span>}
-                                                        {c}
-                                                        {isInSetup && !isSelected && <span className="text-[8px] text-amber-500/50 ml-1">★</span>}
-                                                    </button>
-                                                );
-                                            })}
-                                        </div>
-                                        <p className="text-[9px] text-slate-600 mt-2 italic">★ Starred criteria are recommended for the selected setup.</p>
+                                        <label className="text-[10px] uppercase text-slate-500 font-bold block mb-1.5">Date</label>
+                                        <input
+                                            type="date"
+                                            value={formData.date}
+                                            onChange={(e) => setFormData(p => ({ ...p, date: e.target.value }))}
+                                            className="w-full bg-slate-800 text-slate-100 px-3 py-2 rounded focus:ring-1 focus:ring-amber-500 border border-slate-700 outline-none text-sm"
+                                        />
                                     </div>
-                                )}
-                            </div>
-
-                            {/* Section 3: Execution Details */}
-                            <div className="space-y-4">
-                                <h4 className="text-[10px] uppercase text-amber-500 font-bold tracking-widest border-b border-amber-500/20 pb-1.5">Execution Details</h4>
-                                <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-                                    <div className="space-y-4">
-                                        <div>
-                                            <label className="block text-[10px] text-slate-500 uppercase font-bold mb-1.5">Entry Price</label>
-                                            <input
-                                                type="number" step="0.25"
-                                                value={formData.entry}
-                                                onChange={(e) => setFormData(p => ({ ...p, entry: e.target.value }))}
-                                                className="w-full bg-slate-800 text-white px-3 py-2.5 rounded-lg border border-slate-700 text-sm font-mono font-bold focus:border-amber-500 outline-none"
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-[10px] text-rose-400 uppercase font-bold mb-1.5">Stop Loss</label>
-                                            <input
-                                                type="number" step="0.25"
-                                                value={formData.stopLoss}
-                                                onChange={(e) => setFormData(p => ({ ...p, stopLoss: e.target.value }))}
-                                                className="w-full bg-slate-800 text-rose-300 px-3 py-2.5 rounded-lg border border-rose-900/30 text-sm font-mono focus:border-rose-500 outline-none"
-                                            />
+                                    <div>
+                                        <label className="text-[10px] uppercase text-slate-500 font-bold block mb-1.5">Time</label>
+                                        <input
+                                            type="time"
+                                            value={formData.time}
+                                            onChange={(e) => setFormData(p => ({ ...p, time: e.target.value }))}
+                                            className="w-full bg-slate-800 text-slate-100 px-3 py-2 rounded focus:ring-1 focus:ring-amber-500 border border-slate-700 outline-none text-sm"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-[10px] uppercase text-slate-500 font-bold block mb-1.5">Symbol</label>
+                                        <input
+                                            type="text"
+                                            list="tickers"
+                                            placeholder="MES"
+                                            value={formData.symbol}
+                                            onChange={(e) => handleSymbolChange(e.target.value)}
+                                            className="w-full bg-slate-800 text-slate-100 px-3 py-2 rounded focus:ring-1 focus:ring-amber-500 border border-slate-700 outline-none text-sm font-bold uppercase"
+                                        />
+                                        <datalist id="tickers">
+                                            {Object.keys(FUTURES_SYMBOLS).map(s => <option key={s} value={s} />)}
+                                        </datalist>
+                                    </div>
+                                    <div>
+                                        <label className="text-[10px] uppercase text-slate-500 font-bold block mb-1.5">Direction</label>
+                                        <div className="flex bg-slate-800 rounded p-1 border border-slate-700 h-[38px]">
+                                            <button
+                                                onClick={() => setFormData(p => ({ ...p, direction: 'Long' }))}
+                                                className={`flex-1 text-xs font-bold rounded transition-colors ${formData.direction === 'Long' ? 'bg-emerald-600 text-white' : 'text-slate-500 hover:text-slate-300'}`}
+                                            >
+                                                LONG
+                                            </button>
+                                            <button
+                                                onClick={() => setFormData(p => ({ ...p, direction: 'Short' }))}
+                                                className={`flex-1 text-xs font-bold rounded transition-colors ${formData.direction === 'Short' ? 'bg-rose-600 text-white' : 'text-slate-500 hover:text-slate-300'}`}
+                                            >
+                                                SHORT
+                                            </button>
                                         </div>
                                     </div>
+                                    <div>
+                                        <label className="text-[10px] uppercase text-slate-500 font-bold block mb-1.5 focus:text-amber-500">Tick Val ($)</label>
+                                        <input
+                                            type="number"
+                                            value={formData.tickValue}
+                                            onChange={(e) => setFormData(p => ({ ...p, tickValue: e.target.value }))}
+                                            className="w-full bg-slate-800 text-slate-100 px-3 py-2 rounded focus:ring-1 focus:ring-amber-500 border border-slate-700 outline-none text-sm"
+                                        />
+                                    </div>
+                                </div>
 
-                                    <div className="space-y-4">
-                                        <div>
-                                            <label className="block text-[10px] text-slate-300 uppercase font-bold mb-1.5">Exit Price</label>
-                                            <input
-                                                type="number" step="0.25"
-                                                value={formData.exit}
-                                                onChange={(e) => setFormData(p => ({ ...p, exit: e.target.value }))}
-                                                className="w-full bg-slate-800 text-white px-3 py-2.5 rounded-lg border border-slate-700 text-sm font-mono font-bold focus:border-amber-500 outline-none"
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-[10px] text-emerald-400 uppercase font-bold mb-1.5">Take Profit</label>
-                                            <input
-                                                type="number" step="0.25"
-                                                value={formData.takeProfit}
-                                                onChange={(e) => setFormData(p => ({ ...p, takeProfit: e.target.value }))}
-                                                className="w-full bg-slate-800 text-emerald-300 px-3 py-2.5 rounded-lg border border-emerald-900/30 text-sm font-mono focus:border-emerald-500 outline-none"
-                                            />
-                                        </div>
+                                {/* Section 2: Setup Details */}
+                                <div className="bg-slate-800/20 p-5 rounded-xl border border-slate-700/50 space-y-4">
+                                    <div>
+                                        <label className="text-[10px] uppercase text-slate-500 font-bold block mb-2">Strategy Setup</label>
+                                        <select
+                                            value={formData.setupId}
+                                            onChange={(e) => setFormData(p => ({ ...p, setupId: e.target.value, criteriaUsed: { htf: [], ltf: [], etf: [] } }))}
+                                            className="w-full bg-slate-800 text-slate-200 px-4 py-2.5 rounded-lg border border-slate-600 focus:border-amber-500 outline-none"
+                                        >
+                                            <option value="">Select a setup...</option>
+                                            {setups.map(s => (
+                                                <option key={s.id} value={s.id}>{s.name}</option>
+                                            ))}
+                                        </select>
                                     </div>
 
-                                    <div className="space-y-4">
-                                        <div>
-                                            <label className="block text-[10px] text-slate-500 uppercase font-bold mb-1.5">Quantity</label>
-                                            <input
-                                                type="number" step="1"
-                                                value={formData.quantity}
-                                                onChange={(e) => setFormData(p => ({ ...p, quantity: e.target.value }))}
-                                                className="w-full bg-slate-800 text-slate-100 px-3 py-2.5 rounded-lg border border-slate-700 text-sm focus:border-amber-500 outline-none"
-                                            />
+                                    {formData.setupId && (
+                                        <div className="space-y-4">
+                                            <label className="text-[10px] uppercase text-slate-500 font-bold block mb-2">Assign Process Variables</label>
+                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                                {(['htf', 'ltf', 'etf'] as const).map(cat => (
+                                                    <div key={cat} className="space-y-2.5">
+                                                        <div className="text-[9px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2 bg-slate-800/50 px-2 py-1 rounded">
+                                                            {cat === 'htf' ? '🟦 HTF Context' : cat === 'ltf' ? '🟪 LTF Sequence' : '🟩 ETF Entry'}
+                                                        </div>
+                                                        <div className="flex flex-wrap gap-2">
+                                                            {(criteriaLibrary[cat] || []).length === 0 ? (
+                                                                <div className="text-[10px] text-slate-700 italic">No library items</div>
+                                                            ) : (
+                                                                (criteriaLibrary[cat] || []).map(c => {
+                                                                    const isInSetup = getSetupById(formData.setupId)?.criteria[cat]?.includes(c);
+                                                                    const isSelected = formData.criteriaUsed[cat]?.includes(c);
+                                                                    return (
+                                                                        <button
+                                                                            key={c}
+                                                                            type="button"
+                                                                            onClick={() => setFormData(p => {
+                                                                                const currentCat = p.criteriaUsed[cat] || [];
+                                                                                return {
+                                                                                    ...p,
+                                                                                    criteriaUsed: {
+                                                                                        ...p.criteriaUsed,
+                                                                                        [cat]: isSelected
+                                                                                            ? currentCat.filter(x => x !== c)
+                                                                                            : [...currentCat, c]
+                                                                                    }
+                                                                                };
+                                                                            })}
+                                                                            className={`px-3 py-1.5 text-[10px] rounded-lg border transition-all flex items-center gap-1.5 ${isSelected
+                                                                                ? (cat === 'htf' ? 'bg-blue-500/20 text-blue-400 border-blue-500/50' :
+                                                                                    cat === 'ltf' ? 'bg-purple-500/20 text-purple-400 border-purple-500/50' :
+                                                                                        'bg-emerald-500/20 text-emerald-400 border-emerald-500/50')
+                                                                                : isInSetup
+                                                                                    ? 'bg-slate-800/80 text-slate-300 border-amber-500/40 hover:border-amber-500/60'
+                                                                                    : 'bg-slate-900/50 text-slate-600 border-slate-800 hover:border-slate-700'
+                                                                                }`}
+                                                                        >
+                                                                            {isSelected && <span className="text-[8px]">✓</span>}
+                                                                            {c}
+                                                                            {isInSetup && !isSelected && <span className="text-[8px] text-amber-500/50">★</span>}
+                                                                        </button>
+                                                                    );
+                                                                })
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                            <p className="text-[9px] text-slate-600 mt-2 italic flex items-center gap-2">
+                                                <span className="text-amber-500/60 font-bold">★</span> Recommended criteria for this setup. Grouped by HTF/LTF/ETF.
+                                            </p>
                                         </div>
-                                        <div>
-                                            <label className="block text-[10px] text-slate-400 uppercase font-bold mb-1.5">Commissions ($)</label>
-                                            <input
-                                                type="number" step="0.01"
-                                                value={formData.commissions}
-                                                onChange={(e) => setFormData(p => ({ ...p, commissions: e.target.value }))}
-                                                className="w-full bg-slate-800 text-slate-200 px-3 py-2.5 rounded-lg border border-slate-700 text-sm focus:border-amber-500 outline-none"
-                                            />
+                                    )}
+                                </div>
+
+                                {/* Section 3: Execution Details */}
+                                <div className="space-y-4">
+                                    <h4 className="text-[10px] uppercase text-amber-500 font-bold tracking-widest border-b border-amber-500/20 pb-1.5">Execution Details</h4>
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                                        <div className="space-y-4">
+                                            <div>
+                                                <label className="block text-[10px] text-slate-500 uppercase font-bold mb-1.5">Entry Price</label>
+                                                <input
+                                                    type="number" step="0.25"
+                                                    value={formData.entry}
+                                                    onChange={(e) => setFormData(p => ({ ...p, entry: e.target.value }))}
+                                                    className="w-full bg-slate-800 text-white px-3 py-2.5 rounded-lg border border-slate-700 text-sm font-mono font-bold focus:border-amber-500 outline-none"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-[10px] text-rose-400 uppercase font-bold mb-1.5">Stop Loss</label>
+                                                <input
+                                                    type="number" step="0.25"
+                                                    value={formData.stopLoss}
+                                                    onChange={(e) => setFormData(p => ({ ...p, stopLoss: e.target.value }))}
+                                                    className="w-full bg-slate-800 text-rose-300 px-3 py-2.5 rounded-lg border border-rose-900/30 text-sm font-mono focus:border-rose-500 outline-none"
+                                                />
+                                            </div>
+                                        </div>
+
+                                        <div className="space-y-4">
+                                            <div>
+                                                <label className="block text-[10px] text-slate-300 uppercase font-bold mb-1.5">Exit Price</label>
+                                                <input
+                                                    type="number" step="0.25"
+                                                    value={formData.exit}
+                                                    onChange={(e) => setFormData(p => ({ ...p, exit: e.target.value }))}
+                                                    className="w-full bg-slate-800 text-white px-3 py-2.5 rounded-lg border border-slate-700 text-sm font-mono font-bold focus:border-amber-500 outline-none"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-[10px] text-emerald-400 uppercase font-bold mb-1.5">Take Profit</label>
+                                                <input
+                                                    type="number" step="0.25"
+                                                    value={formData.takeProfit}
+                                                    onChange={(e) => setFormData(p => ({ ...p, takeProfit: e.target.value }))}
+                                                    className="w-full bg-slate-800 text-emerald-300 px-3 py-2.5 rounded-lg border border-emerald-900/30 text-sm font-mono focus:border-emerald-500 outline-none"
+                                                />
+                                            </div>
+                                        </div>
+
+                                        <div className="space-y-4">
+                                            <div>
+                                                <label className="block text-[10px] text-slate-500 uppercase font-bold mb-1.5">Quantity</label>
+                                                <input
+                                                    type="number" step="1"
+                                                    value={formData.quantity}
+                                                    onChange={(e) => setFormData(p => ({ ...p, quantity: e.target.value }))}
+                                                    className="w-full bg-slate-800 text-slate-100 px-3 py-2.5 rounded-lg border border-slate-700 text-sm focus:border-amber-500 outline-none"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-[10px] text-slate-400 uppercase font-bold mb-1.5">Commissions ($)</label>
+                                                <input
+                                                    type="number" step="0.01"
+                                                    value={formData.commissions}
+                                                    onChange={(e) => setFormData(p => ({ ...p, commissions: e.target.value }))}
+                                                    className="w-full bg-slate-800 text-slate-200 px-3 py-2.5 rounded-lg border border-slate-700 text-sm focus:border-amber-500 outline-none"
+                                                />
+                                            </div>
+                                        </div>
+
+                                        <div className="space-y-4">
+                                            <div>
+                                                <label className="block text-[10px] text-amber-500 uppercase font-bold mb-1.5">Max MFE Price</label>
+                                                <input
+                                                    type="number" step="0.25"
+                                                    value={formData.mfePrice}
+                                                    onChange={(e) => setFormData(p => ({ ...p, mfePrice: e.target.value }))}
+                                                    className="w-full bg-slate-800 text-amber-500 px-3 py-2.5 rounded-lg border border-slate-700 text-sm font-bold focus:border-amber-500 outline-none"
+                                                    placeholder="Max Favorable Price"
+                                                />
+                                            </div>
                                         </div>
                                     </div>
+                                </div>
 
-                                    <div className="space-y-4">
-                                        <div>
-                                            <label className="block text-[10px] text-amber-500 uppercase font-bold mb-1.5">Max MFE Price</label>
-                                            <input
-                                                type="number" step="0.25"
-                                                value={formData.mfePrice}
-                                                onChange={(e) => setFormData(p => ({ ...p, mfePrice: e.target.value }))}
-                                                className="w-full bg-slate-800 text-amber-500 px-3 py-2.5 rounded-lg border border-slate-700 text-sm font-bold focus:border-amber-500 outline-none"
-                                                placeholder="Max Favorable Price"
-                                            />
+                                {/* Section 4: Images & Notes */}
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-4">
+                                    <div>
+                                        <label className="text-[10px] uppercase text-slate-500 font-bold block mb-3">Charts (HTF / LTF / ETF)</label>
+                                        <div className="flex gap-3">
+                                            {/* HTF Upload */}
+                                            <div className="flex-1">
+                                                {formData.images.htf ? (
+                                                    <div className="relative group w-full h-24">
+                                                        <img
+                                                            src={formData.images.htf}
+                                                            alt="HTF"
+                                                            className="w-full h-full object-cover rounded-lg border border-slate-700 cursor-zoom-in"
+                                                            onClick={() => setImageModal({ src: formData.images.htf!, zoom: 1, x: 0, y: 0 })}
+                                                        />
+                                                        <button
+                                                            onClick={() => removeImage('htf')}
+                                                            className="absolute -top-2 -right-2 bg-rose-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+                                                        >
+                                                            ×
+                                                        </button>
+                                                        <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-[10px] text-white text-center py-0.5 rounded-b-lg backdrop-blur-sm">
+                                                            HTF
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <label className="w-full h-24 border-2 border-dashed border-slate-700 rounded-lg flex flex-col items-center justify-center text-slate-500 hover:border-amber-500 hover:text-amber-500 transition-all bg-slate-800/30 hover:bg-slate-800/50 cursor-pointer">
+                                                        <span className="text-xl">📷</span>
+                                                        <span className="text-[9px] mt-1 font-bold">ADD HTF</span>
+                                                        <input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e, 'htf')} />
+                                                    </label>
+                                                )}
+                                            </div>
+
+                                            {/* LTF Upload */}
+                                            <div className="flex-1">
+                                                {formData.images.ltf ? (
+                                                    <div className="relative group w-full h-24">
+                                                        <img
+                                                            src={formData.images.ltf}
+                                                            alt="LTF"
+                                                            className="w-full h-full object-cover rounded-lg border border-slate-700 cursor-zoom-in"
+                                                            onClick={() => setImageModal({ src: formData.images.ltf!, zoom: 1, x: 0, y: 0 })}
+                                                        />
+                                                        <button
+                                                            onClick={() => removeImage('ltf')}
+                                                            className="absolute -top-2 -right-2 bg-rose-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+                                                        >
+                                                            ×
+                                                        </button>
+                                                        <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-[10px] text-white text-center py-0.5 rounded-b-lg backdrop-blur-sm">
+                                                            LTF
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <label className="w-full h-24 border-2 border-dashed border-slate-700 rounded-lg flex flex-col items-center justify-center text-slate-500 hover:border-amber-500 hover:text-amber-500 transition-all bg-slate-800/30 hover:bg-slate-800/50 cursor-pointer">
+                                                        <span className="text-xl">📷</span>
+                                                        <span className="text-[9px] mt-1 font-bold">ADD LTF</span>
+                                                        <input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e, 'ltf')} />
+                                                    </label>
+                                                )}
+                                            </div>
+
+                                            {/* ETF Upload */}
+                                            <div className="flex-1">
+                                                {formData.images.etf ? (
+                                                    <div className="relative group w-full h-24">
+                                                        <img
+                                                            src={formData.images.etf}
+                                                            alt="ETF"
+                                                            className="w-full h-full object-cover rounded-lg border border-slate-700 cursor-zoom-in"
+                                                            onClick={() => setImageModal({ src: formData.images.etf!, zoom: 1, x: 0, y: 0 })}
+                                                        />
+                                                        <button
+                                                            onClick={() => removeImage('etf')}
+                                                            className="absolute -top-2 -right-2 bg-rose-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+                                                        >
+                                                            ×
+                                                        </button>
+                                                        <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-[10px] text-white text-center py-0.5 rounded-b-lg backdrop-blur-sm">
+                                                            ETF
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <label className="w-full h-24 border-2 border-dashed border-slate-700 rounded-lg flex flex-col items-center justify-center text-slate-500 hover:border-amber-500 hover:text-amber-500 transition-all bg-slate-800/30 hover:bg-slate-800/50 cursor-pointer">
+                                                        <span className="text-xl">📷</span>
+                                                        <span className="text-[9px] mt-1 font-bold">ADD ETF</span>
+                                                        <input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e, 'etf')} />
+                                                    </label>
+                                                )}
+                                            </div>
                                         </div>
+                                    </div>
+                                    <div>
+                                        <label className="text-[10px] uppercase text-slate-500 font-bold block mb-3">Analysis Notes</label>
+                                        <textarea
+                                            placeholder="Psychology, execution errors, market context..."
+                                            value={formData.notes}
+                                            onChange={(e) => setFormData(p => ({ ...p, notes: e.target.value }))}
+                                            className="w-full bg-slate-800 text-slate-100 px-4 py-3 rounded-xl border border-slate-700 text-sm h-32 resize-none leading-relaxed focus:border-amber-500 outline-none transition-colors"
+                                        />
                                     </div>
                                 </div>
                             </div>
 
-                            {/* Section 4: Images & Notes */}
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-4">
-                                <div>
-                                    <label className="text-[10px] uppercase text-slate-500 font-bold block mb-3">Charts (HTF / LTF / ETF)</label>
-                                    <div className="flex gap-3">
-                                        {/* HTF Upload */}
-                                        <div className="flex-1">
-                                            {formData.images.htf ? (
-                                                <div className="relative group w-full h-24">
-                                                    <img
-                                                        src={formData.images.htf}
-                                                        alt="HTF"
-                                                        className="w-full h-full object-cover rounded-lg border border-slate-700 cursor-zoom-in"
-                                                        onClick={() => setImageModal({ src: formData.images.htf!, zoom: 1, x: 0, y: 0 })}
-                                                    />
-                                                    <button
-                                                        onClick={() => removeImage('htf')}
-                                                        className="absolute -top-2 -right-2 bg-rose-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
-                                                    >
-                                                        ×
-                                                    </button>
-                                                    <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-[10px] text-white text-center py-0.5 rounded-b-lg backdrop-blur-sm">
-                                                        HTF
-                                                    </div>
-                                                </div>
-                                            ) : (
-                                                <label className="w-full h-24 border-2 border-dashed border-slate-700 rounded-lg flex flex-col items-center justify-center text-slate-500 hover:border-amber-500 hover:text-amber-500 transition-all bg-slate-800/30 hover:bg-slate-800/50 cursor-pointer">
-                                                    <span className="text-xl">📷</span>
-                                                    <span className="text-[9px] mt-1 font-bold">ADD HTF</span>
-                                                    <input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e, 'htf')} />
-                                                </label>
-                                            )}
-                                        </div>
-
-                                        {/* LTF Upload */}
-                                        <div className="flex-1">
-                                            {formData.images.ltf ? (
-                                                <div className="relative group w-full h-24">
-                                                    <img
-                                                        src={formData.images.ltf}
-                                                        alt="LTF"
-                                                        className="w-full h-full object-cover rounded-lg border border-slate-700 cursor-zoom-in"
-                                                        onClick={() => setImageModal({ src: formData.images.ltf!, zoom: 1, x: 0, y: 0 })}
-                                                    />
-                                                    <button
-                                                        onClick={() => removeImage('ltf')}
-                                                        className="absolute -top-2 -right-2 bg-rose-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
-                                                    >
-                                                        ×
-                                                    </button>
-                                                    <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-[10px] text-white text-center py-0.5 rounded-b-lg backdrop-blur-sm">
-                                                        LTF
-                                                    </div>
-                                                </div>
-                                            ) : (
-                                                <label className="w-full h-24 border-2 border-dashed border-slate-700 rounded-lg flex flex-col items-center justify-center text-slate-500 hover:border-amber-500 hover:text-amber-500 transition-all bg-slate-800/30 hover:bg-slate-800/50 cursor-pointer">
-                                                    <span className="text-xl">📷</span>
-                                                    <span className="text-[9px] mt-1 font-bold">ADD LTF</span>
-                                                    <input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e, 'ltf')} />
-                                                </label>
-                                            )}
-                                        </div>
-
-                                        {/* ETF Upload */}
-                                        <div className="flex-1">
-                                            {formData.images.etf ? (
-                                                <div className="relative group w-full h-24">
-                                                    <img
-                                                        src={formData.images.etf}
-                                                        alt="ETF"
-                                                        className="w-full h-full object-cover rounded-lg border border-slate-700 cursor-zoom-in"
-                                                        onClick={() => setImageModal({ src: formData.images.etf!, zoom: 1, x: 0, y: 0 })}
-                                                    />
-                                                    <button
-                                                        onClick={() => removeImage('etf')}
-                                                        className="absolute -top-2 -right-2 bg-rose-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
-                                                    >
-                                                        ×
-                                                    </button>
-                                                    <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-[10px] text-white text-center py-0.5 rounded-b-lg backdrop-blur-sm">
-                                                        ETF
-                                                    </div>
-                                                </div>
-                                            ) : (
-                                                <label className="w-full h-24 border-2 border-dashed border-slate-700 rounded-lg flex flex-col items-center justify-center text-slate-500 hover:border-amber-500 hover:text-amber-500 transition-all bg-slate-800/30 hover:bg-slate-800/50 cursor-pointer">
-                                                    <span className="text-xl">📷</span>
-                                                    <span className="text-[9px] mt-1 font-bold">ADD ETF</span>
-                                                    <input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e, 'etf')} />
-                                                </label>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
-                                <div>
-                                    <label className="text-[10px] uppercase text-slate-500 font-bold block mb-3">Analysis Notes</label>
-                                    <textarea
-                                        placeholder="Psychology, execution errors, market context..."
-                                        value={formData.notes}
-                                        onChange={(e) => setFormData(p => ({ ...p, notes: e.target.value }))}
-                                        className="w-full bg-slate-800 text-slate-100 px-4 py-3 rounded-xl border border-slate-700 text-sm h-32 resize-none leading-relaxed focus:border-amber-500 outline-none transition-colors"
-                                    />
-                                </div>
+                            <div className="p-5 border-t border-slate-800 bg-slate-900/90 flex justify-end gap-3">
+                                <button onClick={resetForm} className="px-6 py-2.5 bg-transparent hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-colors text-sm font-medium">
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={handleSubmit}
+                                    className="px-10 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-bold rounded-lg shadow-lg shadow-amber-500/20 transform active:scale-95 transition-all text-sm"
+                                >
+                                    {editingEntry ? 'Update Entry' : 'Log Trade'}
+                                </button>
                             </div>
-                        </div>
-
-                        <div className="p-5 border-t border-slate-800 bg-slate-900/90 flex justify-end gap-3">
-                            <button onClick={resetForm} className="px-6 py-2.5 bg-transparent hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-colors text-sm font-medium">
-                                Cancel
-                            </button>
-                            <button
-                                onClick={handleSubmit}
-                                className="px-10 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-bold rounded-lg shadow-lg shadow-amber-500/20 transform active:scale-95 transition-all text-sm"
-                            >
-                                {editingEntry ? 'Update Entry' : 'Log Trade'}
-                            </button>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            }
 
             {/* Image Modal */}
-            {imageModal && createPortal(
-                <div
-                    className="fixed inset-0 bg-black/95 z-[9999] flex items-center justify-center backdrop-blur-sm overflow-hidden"
-                    onClick={() => setImageModal(null)}
-                    onWheel={(e) => {
-                        e.stopPropagation();
-                        const delta = -e.deltaY * 0.001;
-                        setImageModal(prev => {
-                            if (!prev) return null;
-                            const newZoom = Math.min(Math.max(0.1, prev.zoom + delta), 10);
-                            return { ...prev, zoom: newZoom };
-                        });
-                    }}
-                    onMouseDown={(e) => {
-                        if (!imageModal) return;
-                        dragRef.current.isDragging = true;
-                        dragRef.current.startX = e.clientX;
-                        dragRef.current.startY = e.clientY;
-                        dragRef.current.lastX = imageModal.x;
-                        dragRef.current.lastY = imageModal.y;
-                    }}
-                    onMouseMove={(e) => {
-                        if (!imageModal || !dragRef.current.isDragging) return;
-                        e.preventDefault();
-                        const dx = e.clientX - dragRef.current.startX;
-                        const dy = e.clientY - dragRef.current.startY;
-                        const newX = dragRef.current.lastX + dx;
-                        const newY = dragRef.current.lastY + dy;
-                        setImageModal(prev => prev ? { ...prev, x: newX, y: newY } : null);
-                    }}
-                    onMouseUp={() => { dragRef.current.isDragging = false; }}
-                    onMouseLeave={() => { dragRef.current.isDragging = false; }}
-                >
+            {
+                imageModal && createPortal(
                     <div
-                        className="relative w-full h-full flex items-center justify-center"
-                        onClick={e => e.stopPropagation()}
-                        style={{ cursor: dragRef.current.isDragging ? 'grabbing' : 'grab' }}
+                        className="fixed inset-0 bg-black/95 z-[9999] flex items-center justify-center backdrop-blur-sm overflow-hidden"
+                        onClick={() => setImageModal(null)}
+                        onWheel={(e) => {
+                            e.stopPropagation();
+                            const delta = -e.deltaY * 0.001;
+                            setImageModal(prev => {
+                                if (!prev) return null;
+                                const newZoom = Math.min(Math.max(0.1, prev.zoom + delta), 10);
+                                return { ...prev, zoom: newZoom };
+                            });
+                        }}
+                        onMouseDown={(e) => {
+                            if (!imageModal) return;
+                            dragRef.current.isDragging = true;
+                            dragRef.current.startX = e.clientX;
+                            dragRef.current.startY = e.clientY;
+                            dragRef.current.lastX = imageModal.x;
+                            dragRef.current.lastY = imageModal.y;
+                        }}
+                        onMouseMove={(e) => {
+                            if (!imageModal || !dragRef.current.isDragging) return;
+                            e.preventDefault();
+                            const dx = e.clientX - dragRef.current.startX;
+                            const dy = e.clientY - dragRef.current.startY;
+                            const newX = dragRef.current.lastX + dx;
+                            const newY = dragRef.current.lastY + dy;
+                            setImageModal(prev => prev ? { ...prev, x: newX, y: newY } : null);
+                        }}
+                        onMouseUp={() => { dragRef.current.isDragging = false; }}
+                        onMouseLeave={() => { dragRef.current.isDragging = false; }}
                     >
-                        <img
-                            src={imageModal.src}
-                            alt="Evidence"
-                            draggable={false}
-                            style={{
-                                transform: `translate(${imageModal.x}px, ${imageModal.y}px) scale(${imageModal.zoom})`,
-                                transition: dragRef.current.isDragging ? 'none' : 'transform 0.1s ease-out',
-                                maxWidth: 'none',
-                                maxHeight: 'none',
-                            }}
-                            className="object-contain shadow-2xl select-none"
-                        />
-                        <button
-                            onClick={() => setImageModal(null)}
-                            className="absolute top-6 right-6 w-12 h-12 bg-slate-800/50 hover:bg-rose-600 text-white rounded-full text-2xl flex items-center justify-center transition-colors z-50 shadow-lg border border-white/10"
+                        <div
+                            className="relative w-full h-full flex items-center justify-center"
+                            onClick={e => e.stopPropagation()}
+                            style={{ cursor: dragRef.current.isDragging ? 'grabbing' : 'grab' }}
                         >
-                            ✕
-                        </button>
-                    </div>
-                </div>,
-                document.body
-            )}
-        </div>
+                            <img
+                                src={imageModal.src}
+                                alt="Evidence"
+                                draggable={false}
+                                style={{
+                                    transform: `translate(${imageModal.x}px, ${imageModal.y}px) scale(${imageModal.zoom})`,
+                                    transition: dragRef.current.isDragging ? 'none' : 'transform 0.1s ease-out',
+                                    maxWidth: 'none',
+                                    maxHeight: 'none',
+                                }}
+                                className="object-contain shadow-2xl select-none"
+                            />
+                            <button
+                                onClick={() => setImageModal(null)}
+                                className="absolute top-6 right-6 w-12 h-12 bg-slate-800/50 hover:bg-rose-600 text-white rounded-full text-2xl flex items-center justify-center transition-colors z-50 shadow-lg border border-white/10"
+                            >
+                                ✕
+                            </button>
+                        </div>
+                    </div>,
+                    document.body
+                )
+            }
+        </div >
     );
 };
 
