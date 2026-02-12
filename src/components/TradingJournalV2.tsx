@@ -1995,6 +1995,62 @@ const TradingJournal = () => {
                                 </div>
                             </div>
 
+                            {/* Trading Plan Checklist */}
+                            {(() => {
+                                const selectedSetup = setups.find(s => s.id === formData.setupId);
+                                if (!selectedSetup || !selectedSetup.checklist || selectedSetup.checklist.length === 0) return null;
+                                const allChecked = selectedSetup.checklist.every(item => checklistProgress.includes(item));
+                                return (
+                                    <div className={`mx-5 mb-0 p-5 rounded-xl border-2 transition-all duration-300 ${allChecked
+                                        ? 'bg-emerald-500/5 border-emerald-500/30'
+                                        : 'bg-amber-500/5 border-amber-500/30 animate-pulse'}`}>
+                                        <h4 className="text-sm font-bold text-amber-400 mb-4 flex items-center gap-2">
+                                            <span>📋</span> Trading Plan — {selectedSetup.name}
+                                            <span className={`ml-auto text-[10px] font-mono px-2 py-0.5 rounded ${allChecked
+                                                ? 'bg-emerald-500/20 text-emerald-400'
+                                                : 'bg-amber-500/20 text-amber-400'}`}>
+                                                {checklistProgress.length}/{selectedSetup.checklist.length}
+                                            </span>
+                                        </h4>
+                                        <div className="space-y-3">
+                                            {selectedSetup.checklist.map((item, idx) => {
+                                                const isChecked = checklistProgress.includes(item);
+                                                return (
+                                                    <label
+                                                        key={idx}
+                                                        className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-200 ${isChecked
+                                                            ? 'bg-emerald-500/10 border border-emerald-500/20'
+                                                            : 'bg-slate-800/50 border border-slate-700/50 hover:bg-slate-800'}`}
+                                                    >
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={isChecked}
+                                                            onChange={() => {
+                                                                setChecklistProgress(prev =>
+                                                                    isChecked
+                                                                        ? prev.filter(i => i !== item)
+                                                                        : [...prev, item]
+                                                                );
+                                                            }}
+                                                            className="w-4 h-4 accent-amber-500 rounded"
+                                                        />
+                                                        <span className={`text-sm transition-all ${isChecked ? 'text-emerald-300 line-through opacity-70' : 'text-slate-200'}`}>
+                                                            {item}
+                                                        </span>
+                                                        {isChecked && <span className="ml-auto text-emerald-400 text-xs">✓</span>}
+                                                    </label>
+                                                );
+                                            })}
+                                        </div>
+                                        {!allChecked && (
+                                            <p className="text-[10px] text-amber-500/70 mt-3 uppercase tracking-wide font-bold">
+                                                ⚠️ Complete all checklist items before logging the trade
+                                            </p>
+                                        )}
+                                    </div>
+                                );
+                            })()}
+
                             <div className="p-5 border-t border-slate-800 bg-slate-900/90 flex justify-end gap-3">
                                 <button onClick={resetForm} className="px-6 py-2.5 bg-transparent hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-colors text-sm font-medium">
                                     Cancel
