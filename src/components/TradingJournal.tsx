@@ -139,6 +139,12 @@ const TradingJournal = () => {
         localStorage.setItem('tradingJournalCriteria', JSON.stringify(criteriaLibrary));
     }, [criteriaLibrary]);
 
+    useEffect(() => {
+        if (activeSubTab === 'setupStats' && filterSetup === 'all' && setups.length > 0) {
+            setFilterSetup(setups[0].id);
+        }
+    }, [activeSubTab, filterSetup, setups]);
+
     // ============= Calculations =============
     const calculateStats = useCallback((entriesToCalc: JournalEntry[]) => {
         const totalTrades = entriesToCalc.length;
@@ -506,7 +512,7 @@ const TradingJournal = () => {
                 <div className="flex items-center space-x-3">
                     <span className="text-3xl">📊</span>
                     <div>
-                        <h2 className="text-2xl font-bold text-white">Trading Journal <span className="text-amber-500 text-sm">(v2.0)</span></h2>
+                        <h2 className="text-2xl font-bold text-white">Trading Journal <span className="text-amber-500 text-sm">(v2.1)</span></h2>
                         <p className="text-xs text-slate-500">Track executions, analyze setups, master your edge</p>
                     </div>
                 </div>
@@ -782,17 +788,33 @@ const TradingJournal = () => {
                             ) : (
                                 <>
                                     <div className="bg-slate-800/30 p-4 rounded-lg border border-slate-700">
-                                        <div className="text-xs text-slate-500 uppercase mb-2">Filter by Criteria</div>
+                                        <div className="text-xs text-slate-500 uppercase mb-2">Filter Analysis by Variables</div>
                                         <div className="p-4 border border-slate-700 rounded-lg bg-slate-800/20">
-                                            <div className="text-xs font-bold text-slate-500 uppercase mb-3 flex justify-between">
-                                                <span>Select Setup Criteria</span>
-                                                <span className="text-amber-500 lowercase font-normal italic">Required for analysis</span>
+                                            <div className="text-xs font-bold text-slate-500 uppercase mb-3 flex justify-between items-center">
+                                                <span>Variables Found in History</span>
+                                                <div className="flex items-center space-x-2">
+                                                    <span className="text-[10px] text-amber-500/80 lowercase italic font-normal">Matching items: {filteredEntries.length}</span>
+                                                    <button
+                                                        onClick={() => setFilterCriteria([])}
+                                                        className="text-[10px] text-slate-500 hover:text-amber-500 transition-colors uppercase font-bold"
+                                                    >
+                                                        Clear
+                                                    </button>
+                                                </div>
                                             </div>
                                             <div className="flex flex-wrap gap-2">
-                                                {getSetupById(filterSetup)?.criteria.length === 0 ? (
-                                                    <div className="text-xs text-slate-600 italic">No criteria defined for this setup. Go to Setups manager to add them.</div>
-                                                ) : (
-                                                    getSetupById(filterSetup)?.criteria.map(c => {
+                                                {(() => {
+                                                    const harvestedCriteria = Array.from(new Set(
+                                                        entries
+                                                            .filter(e => e.setupId === filterSetup)
+                                                            .flatMap(e => e.criteriaUsed || [])
+                                                    )).sort();
+
+                                                    if (harvestedCriteria.length === 0) {
+                                                        return <div className="text-xs text-slate-600 italic">No criteria found in trades for this setup yet.</div>;
+                                                    }
+
+                                                    return harvestedCriteria.map(c => {
                                                         const isActive = filterCriteria.includes(c);
                                                         return (
                                                             <button
@@ -809,12 +831,17 @@ const TradingJournal = () => {
                                                                 {isActive ? '✓ ' : ''}{c}
                                                             </button>
                                                         );
-                                                    })
-                                                )}
+                                                    });
+                                                })()}
                                             </div>
                                         </div>
-                                        <div className="mt-2 text-[10px] text-slate-500 text-right">
-                                            Showing {filteredEntries.length} of {entries.filter(e => e.setupId === filterSetup).length} trades
+                                        <div className="mt-2 flex justify-between items-center">
+                                            <div className="text-[10px] text-slate-600 italic">
+                                                * Selecting multiple variables uses "AND" logic (trade must contain ALL selected)
+                                            </div>
+                                            <div className="text-[10px] text-slate-500 text-right">
+                                                Analyzing {filteredEntries.length} of {entries.filter(e => e.setupId === filterSetup).length} trades
+                                            </div>
                                         </div>
                                     </div>
 
