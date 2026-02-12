@@ -15,14 +15,17 @@ interface JournalEntry {
     date: string;
     time: string;
     symbol: string;
-    tickValue: number; // Value per 1 point move (e.g. 5 for MES)
+    direction: 'Long' | 'Short';
+    tickValue: number; // Value per TICK (e.g. $1.25 for MES)
+    tickSize: number;  // Size of one TICK (e.g. 0.25 for MES)
     setupId: string;
     criteriaUsed: string[];
     entry: number;
     exit: number;
     stopLoss: number;
     takeProfit: number;
-    maxMove: number;
+    mfePrice: number; // Max Favorable Excursion Price
+    maxMovePoints: number; // Calculated points from Entry to MFE
     quantity: number;
     commissions: number;
     pnl: number;
@@ -107,16 +110,18 @@ const TradingJournal = () => {
         date: new Date().toISOString().split('T')[0],
         time: new Date().toTimeString().slice(0, 5),
         symbol: 'MES',
-        tickValue: '5',
+        direction: 'Long' as 'Long' | 'Short', // Default Direction
+        tickValue: '1.25', // Default MES Tick Value
+        tickSize: '0.25',  // Default MES Tick Size
         setupId: '',
         criteriaUsed: [] as string[],
         stopLoss: '',
         takeProfit: '',
         entry: '',
         exit: '',
-        maxMove: '',
+        mfePrice: '', // Changed from maxMove
         quantity: '1',
-        commissions: '',
+        commissions: '1.82', // Default MES Commission
         notes: '',
         images: [] as string[],
     });
@@ -180,7 +185,11 @@ const TradingJournal = () => {
         return filtered;
     }, [entries, filterSetup, filterCriteria]);
 
-    const currentStats = useMemo(() => calculateStats(filteredEntries), [filteredEntries, calculateStats]);
+    const [currentStats, setCurrentStats] = useState(() => calculateStats(entries));
+
+    useEffect(() => {
+        setCurrentStats(calculateStats(filteredEntries));
+    }, [filteredEntries, calculateStats]);
 
     // Analytics Data
     const equityCurveData = useMemo(() => {
@@ -243,6 +252,7 @@ const TradingJournal = () => {
             ...prev,
             symbol: upperVal,
             tickValue: config ? config.pointValue.toString() : prev.tickValue,
+            tickSize: config ? (config.pointValue / 5).toString() : prev.tickSize, // Assuming tickSize is pointValue / 5 for now, needs proper config
             commissions: config ? config.commission.toString() : prev.commissions
         }));
     };
@@ -252,49 +262,73 @@ const TradingJournal = () => {
         const exit = parseFloat(formData.exit) || 0;
         const stopLoss = parseFloat(formData.stopLoss) || 0;
         const quantity = parseFloat(formData.quantity) || 1;
-        const tickValue = parseFloat(formData.tickValue) || 1;
+        const tickValue = parseFloat(formData.tickValue) || 1.25;
+        const tickSize = parseFloat(formData.tickSize) || 0.25;
+        const commissions = parseFloat(formData.commissions) || 0;
+        const mfePrice = parseFloat(formData.mfePrice); // Optional
 
-        // P&L Calculation for Futures: (Exit - Entry) * Quantity * TickValue (assuming Entry/Exit are raw prices)
-        // For Long: (Exit - Entry)
-        // For Short: (Entry - Exit) - Need to detect direction.
-        // Usually journal entry implies direction by context. 
-        // Let's assume Long if TP > Entry, Short if TP < Entry or based on SL.
-        // Improved logic: compare Entry and StopLoss to detect direction.
-
-        let direction = 1; // 1 for Long, -1 for Short
-        if (stopLoss !== 0) {
-            direction = stopLoss < entry ? 1 : -1;
-        } else if (parseFloat(formData.takeProfit) !== 0) {
-            direction = parseFloat(formData.takeProfit) > entry ? 1 : -1;
+        // P&L Logic
+        let priceDiff = 0;
+        if (formData.direction === 'Long') {
+            priceDiff = exit - entry;
+        } else {
+            priceDiff = entry - exit;
         }
 
-        const rawPriceDiff = (exit - entry) * direction;
-        const commissions = parseFloat(formData.commissions) || 0;
-        const pnl = (rawPriceDiff * quantity * tickValue) - commissions;
+        // PnL = (Points / TickSize) * TickValue * Contracts - Commissions
+        const pnl = ((priceDiff / tickSize) * tickValue * quantity) - commissions;
 
-        // PnL Percent is tricky for futures (margin based), so we use price % change
-        const pnlPercent = entry > 0 ? (rawPriceDiff / entry) * 100 : 0;
+        // R-Multiple
+        let riskPerContract = 0;
+        if (formData.direction === 'Long') {
+            riskPerContract = Math.abs(entry - stopLoss);
+        } else {
+            riskPerContract = Math.abs(stopLoss - entry);
+        }
 
-        const riskPriceDiff = Math.abs(entry - stopLoss);
-        const rMultiple = (riskPriceDiff > 0 && stopLoss !== 0) ? rawPriceDiff / riskPriceDiff : 0;
+        // Ensure R is signed correctly? Usually R is positive for wins, negative for losses.
+        // Or R-Multiple is a ratio. Ratio of Profit/Risk. 
+        // If PnL > 0, +R. If PnL < 0, -R.
+        // Theoretical R based on Exit:
+        const rewardPerContract = Math.abs(priceDiff);
+        let rMultiple = (riskPerContract > 0) ? (rewardPerContract / riskPerContract) : 0;
+        if (pnl < 0) rMultiple = -rMultiple;
 
         let result: 'WIN' | 'LOSS' | 'BREAKEVEN' = 'BREAKEVEN';
         if (pnl > 0) result = 'WIN';
         else if (pnl < 0) result = 'LOSS';
+
+        // PnL Percent (ROI on Margin?) -> Futures ROI is based on Margin, but we don't track margin. 
+        // Just use price % change?
+        const pnlPercent = entry > 0 ? (priceDiff / entry) * 100 : 0;
+
+        // Max Move Points (for stats)
+        let maxMovePoints = 0;
+        if (!isNaN(mfePrice) && mfePrice !== 0) {
+            if (formData.direction === 'Long') {
+                maxMovePoints = mfePrice - entry;
+            } else {
+                maxMovePoints = entry - mfePrice;
+            }
+            if (maxMovePoints < 0) maxMovePoints = 0; // MFE implies favorable
+        }
 
         const newEntry: JournalEntry = {
             id: editingEntry?.id || `entry_${Date.now()}`,
             date: formData.date,
             time: formData.time,
             symbol: formData.symbol.toUpperCase(),
+            direction: formData.direction,
             tickValue,
+            tickSize,
             setupId: formData.setupId,
             criteriaUsed: formData.criteriaUsed,
             entry,
             exit,
             stopLoss,
             takeProfit: parseFloat(formData.takeProfit) || 0,
-            maxMove: parseFloat(formData.maxMove) || 0,
+            mfePrice: mfePrice || 0,
+            maxMovePoints,
             quantity,
             commissions,
             pnl,
@@ -317,18 +351,20 @@ const TradingJournal = () => {
     const resetForm = () => {
         setFormData({
             date: new Date().toISOString().split('T')[0],
-            time: new Date().toTimeString().slice(0, 5),
+            time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
             symbol: 'MES',
-            tickValue: '5',
+            direction: 'Long',
+            tickValue: '1.25',
+            tickSize: '0.25',
             setupId: '',
             criteriaUsed: [],
             stopLoss: '',
             takeProfit: '',
             entry: '',
             exit: '',
-            maxMove: '',
+            mfePrice: '',
             quantity: '1',
-            commissions: '',
+            commissions: '1.82',
             notes: '',
             images: [],
         });
@@ -337,18 +373,44 @@ const TradingJournal = () => {
     };
 
     const editEntry = (entry: JournalEntry) => {
+        // Migration logic for old entries
+        let direction = entry.direction;
+        if (!direction) {
+            if (entry.stopLoss && entry.entry) {
+                direction = entry.stopLoss < entry.entry ? 'Long' : 'Short';
+            } else {
+                direction = 'Long';
+            }
+        }
+
+        // Migration of mfePrice from legacy maxMove (points)
+        let mfePrice = entry.mfePrice?.toString() || '';
+        if (!mfePrice && (entry as any).maxMove) {
+            const points = parseFloat((entry as any).maxMove);
+            if (!isNaN(points) && points !== 0) {
+                const entryPrice = entry.entry;
+                if (direction === 'Long') {
+                    mfePrice = (entryPrice + points).toString();
+                } else {
+                    mfePrice = (entryPrice - points).toString();
+                }
+            }
+        }
+
         setFormData({
             date: entry.date,
             time: entry.time,
             symbol: entry.symbol,
-            tickValue: entry.tickValue?.toString() || '1',
+            direction,
+            tickValue: entry.tickValue?.toString() || '1.25',
+            tickSize: entry.tickSize?.toString() || '0.25',
             setupId: entry.setupId,
             criteriaUsed: entry.criteriaUsed,
             entry: entry.entry.toString(),
             exit: entry.exit.toString(),
             stopLoss: entry.stopLoss.toString(),
             takeProfit: entry.takeProfit.toString(),
-            maxMove: entry.maxMove?.toString() || '',
+            mfePrice,
             quantity: entry.quantity.toString(),
             commissions: entry.commissions?.toString() || '',
             notes: entry.notes,
@@ -983,7 +1045,7 @@ const TradingJournal = () => {
 
                         <div className="flex-1 overflow-y-auto p-6 space-y-8">
                             {/* Section 1: Instrument & Time */}
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                                 <div>
                                     <label className="text-[10px] uppercase text-slate-500 font-bold block mb-1.5">Date</label>
                                     <input
@@ -1017,7 +1079,24 @@ const TradingJournal = () => {
                                     </datalist>
                                 </div>
                                 <div>
-                                    <label className="text-[10px] uppercase text-slate-500 font-bold block mb-1.5">Tick Value ($)</label>
+                                    <label className="text-[10px] uppercase text-slate-500 font-bold block mb-1.5">Direction</label>
+                                    <div className="flex bg-slate-800 rounded p-1 border border-slate-700 h-[38px]">
+                                        <button
+                                            onClick={() => setFormData(p => ({ ...p, direction: 'Long' }))}
+                                            className={`flex-1 text-xs font-bold rounded transition-colors ${formData.direction === 'Long' ? 'bg-emerald-600 text-white' : 'text-slate-500 hover:text-slate-300'}`}
+                                        >
+                                            LONG
+                                        </button>
+                                        <button
+                                            onClick={() => setFormData(p => ({ ...p, direction: 'Short' }))}
+                                            className={`flex-1 text-xs font-bold rounded transition-colors ${formData.direction === 'Short' ? 'bg-rose-600 text-white' : 'text-slate-500 hover:text-slate-300'}`}
+                                        >
+                                            SHORT
+                                        </button>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="text-[10px] uppercase text-slate-500 font-bold block mb-1.5 focus:text-amber-500">Tick Val ($)</label>
                                     <input
                                         type="number"
                                         value={formData.tickValue}
@@ -1148,13 +1227,13 @@ const TradingJournal = () => {
 
                                     <div className="space-y-4">
                                         <div>
-                                            <label className="block text-[10px] text-amber-500 uppercase font-bold mb-1.5">Max Move (Points)</label>
+                                            <label className="block text-[10px] text-amber-500 uppercase font-bold mb-1.5">Max MFE Price</label>
                                             <input
                                                 type="number" step="0.25"
-                                                value={formData.maxMove}
-                                                onChange={(e) => setFormData(p => ({ ...p, maxMove: e.target.value }))}
-                                                className="w-full bg-slate-800 text-amber-100 px-3 py-2.5 rounded-lg border border-slate-700 text-sm focus:border-amber-500 outline-none"
-                                                placeholder="0.00"
+                                                value={formData.mfePrice}
+                                                onChange={(e) => setFormData(p => ({ ...p, mfePrice: e.target.value }))}
+                                                className="w-full bg-slate-800 text-amber-500 px-3 py-2.5 rounded-lg border border-slate-700 text-sm font-bold focus:border-amber-500 outline-none"
+                                                placeholder="Max Favorable Price"
                                             />
                                         </div>
                                     </div>
