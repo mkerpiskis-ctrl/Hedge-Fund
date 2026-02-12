@@ -333,7 +333,29 @@ const TradingJournal = () => {
         const weeks = Math.max(1, Math.ceil((lastDate.getTime() - firstDate.getTime()) / (7 * 24 * 60 * 60 * 1000)));
         const tradesPerWeek = filteredEntries.length / weeks;
 
-        return { sessions, bestEdge, tradesPerWeek, totalWeeks: weeks };
+        // 4. Streak & Form Analysis
+        const sortedByDate = [...filteredEntries].sort((a, b) => {
+            return new Date(b.date + 'T' + b.time).getTime() - new Date(a.date + 'T' + a.time).getTime();
+        });
+
+        const recentForm = sortedByDate.slice(0, 5).map(e => e.result);
+
+        let streakCount = 0;
+        let streakType: 'WIN' | 'LOSS' | 'BREAKEVEN' | null = null;
+
+        for (const trade of sortedByDate) {
+            if (!streakType) {
+                streakType = trade.result; // Initialize with most recent result
+            }
+
+            if (trade.result === streakType && streakType !== 'BREAKEVEN') {
+                streakCount++;
+            } else {
+                break;
+            }
+        }
+
+        return { sessions, bestEdge, tradesPerWeek, totalWeeks: weeks, currentStreak: { count: streakCount, type: streakType }, recentForm };
     }, [filteredEntries]);
 
 
@@ -650,7 +672,7 @@ const TradingJournal = () => {
                 <div className="flex items-center space-x-3">
                     <span className="text-3xl">📊</span>
                     <div>
-                        <h2 className="text-2xl font-bold text-white">Trading Journal <span className="text-amber-500 text-sm">(v2.4.3)</span></h2>
+                        <h2 className="text-2xl font-bold text-white">Trading Journal <span className="text-amber-500 text-sm">(v2.4.4)</span></h2>
                         <p className="text-xs text-slate-500">Track executions, analyze setups, master your edge</p>
                     </div>
                 </div>
@@ -1054,7 +1076,7 @@ const TradingJournal = () => {
                                             </div>
 
                                             {/* Advanced Insights Cards */}
-                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                                                 {/* 1. MFE Optimization */}
                                                 <div className="bg-slate-800/40 p-5 rounded-xl border border-amber-500/20 shadow-lg shadow-amber-900/5">
                                                     <h4 className="text-xs font-bold text-amber-500 uppercase mb-3 flex items-center gap-2">
@@ -1109,7 +1131,7 @@ const TradingJournal = () => {
                                                     </div>
                                                 </div>
 
-                                                {/* 3. Frequency & Time */}
+                                                {/* 3. Trade Frequency */}
                                                 <div className="bg-slate-800/40 p-5 rounded-xl border border-slate-700">
                                                     <h4 className="text-xs font-bold text-slate-500 uppercase mb-3 flex items-center gap-2">
                                                         <span>⚡</span> Trade Frequency
@@ -1126,6 +1148,37 @@ const TradingJournal = () => {
                                                                     ? `Most active at ${[...timeOfDayData].sort((a, b) => b.total - a.total)[0].hour}`
                                                                     : 'No time data available'
                                                                 }
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                {/* 4. Current Form & Streak */}
+                                                <div className="bg-slate-800/40 p-5 rounded-xl border border-slate-700">
+                                                    <h4 className="text-xs font-bold text-slate-500 uppercase mb-3 flex items-center gap-2">
+                                                        <span>🔥</span> Current Form
+                                                    </h4>
+                                                    <div className="space-y-4">
+                                                        <div>
+                                                            <div className={`text-2xl font-bold ${setupAnalytics?.currentStreak.type === 'WIN' ? 'text-emerald-400' : setupAnalytics?.currentStreak.type === 'LOSS' ? 'text-rose-400' : 'text-slate-400'}`}>
+                                                                {setupAnalytics?.currentStreak.count} {setupAnalytics?.currentStreak.type ? (setupAnalytics.currentStreak.count === 1 ? (setupAnalytics.currentStreak.type === 'WIN' ? 'WIN' : 'LOSS') : (setupAnalytics.currentStreak.type === 'WIN' ? 'WINS' : 'LOSSES')) : 'TRADES'}
+                                                            </div>
+                                                            <div className="text-[10px] text-slate-500 uppercase font-bold">Current Streak</div>
+                                                        </div>
+                                                        <div className="border-t border-slate-700/50 pt-3">
+                                                            <div className="text-xs text-slate-400 mb-2">Last 5 Trades:</div>
+                                                            <div className="flex gap-1.5">
+                                                                {setupAnalytics?.recentForm.map((result, i) => (
+                                                                    <div
+                                                                        key={i}
+                                                                        className={`w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold ${result === 'WIN' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
+                                                                            result === 'LOSS' ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' :
+                                                                                'bg-slate-700 text-slate-400 border border-slate-600'
+                                                                            }`}
+                                                                    >
+                                                                        {result === 'WIN' ? 'W' : result === 'LOSS' ? 'L' : '-'}
+                                                                    </div>
+                                                                ))}
                                                             </div>
                                                         </div>
                                                     </div>
