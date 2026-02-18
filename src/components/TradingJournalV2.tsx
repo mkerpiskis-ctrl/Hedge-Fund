@@ -984,12 +984,41 @@ const TradingJournal = () => {
         if (!targetUser) return;
 
         if (!isSilent) {
-            if (!confirm('This will upload your local data (Entries, Criteria, Achievements) to Cloud Storage. This may overwrite existing cloud settings. Continue?')) return;
+            if (!confirm('This will upload your local data (Setups, Entries, Criteria, Achievements) to Cloud Storage. This may overwrite existing cloud settings. Continue?')) return;
             setIsLoading(true);
         }
 
         try {
-            // 1. Migrate Entries
+            console.log('Migration started...');
+
+            // 1. Migrate Setups FIRST (to get new UUIDs)
+            const localSetupsStr = localStorage.getItem('tradingJournalSetups');
+            const setupIdMap: Record<string, string> = {}; // { oldId: newUuid }
+
+            if (localSetupsStr) {
+                const localSetups = JSON.parse(localSetupsStr);
+                for (const s of localSetups) {
+                    const { data: newSetup, error: setupError } = await supabase
+                        .from('trade_setups')
+                        .insert({
+                            user_id: targetUser.id,
+                            name: s.name,
+                            color: s.color,
+                            criteria: s.criteria || {},
+                            checklist: s.checklist || []
+                        })
+                        .select()
+                        .single();
+
+                    if (setupError) {
+                        console.error('Setup migration error:', setupError);
+                    } else if (newSetup) {
+                        setupIdMap[s.id] = newSetup.id;
+                    }
+                }
+            }
+
+            // 2. Migrate Entries (mapping setup IDs)
             const localEntriesStr = localStorage.getItem('tradingJournalEntries');
             if (localEntriesStr) {
                 const localEntries = JSON.parse(localEntriesStr);
@@ -1004,20 +1033,20 @@ const TradingJournal = () => {
                     r_multiple: e.r_multiple || e.rMultiple || 0,
                     entry_price: e.entry || 0,
                     exit_price: e.exit || 0,
-                    stop_loss: e.stop_loss || e.stopLoss || 0,
-                    take_profit: e.take_profit || e.takeProfit || 0,
+                    stop_loss: e.stop_loss || 0,
+                    take_profit: e.take_profit || 0,
                     quantity: e.quantity || 0,
-                    setup_id: e.setupId || '',
+                    setup_id: setupIdMap[e.setupId] || null, // Link to new UUID
                     criteria_used: e.criteria_used || e.criteriaUsed || {},
                     images: e.images || {},
                     notes: e.notes || ''
                 }));
 
                 const { error: entryError } = await supabase.from('trade_journal').insert(dbEntries);
-                if (entryError) console.warn('Entry migration partial issue:', entryError);
+                if (entryError) console.error('Entry migration error:', entryError);
             }
 
-            // 2. Migrate Criteria & Achievements
+            // 3. Migrate Criteria & Achievements
             const localCriteriaStr = localStorage.getItem('tradingJournalCriteria');
             const localAchievementsStr = localStorage.getItem('tradingJournalAchievements');
 
@@ -1027,25 +1056,19 @@ const TradingJournal = () => {
                 if (localAchievementsStr) updates.achievements = JSON.parse(localAchievementsStr);
 
                 const { error: settingsError } = await supabase.from('user_settings').upsert(updates, { onConflict: 'user_id' });
-                if (settingsError) throw settingsError;
+                if (settingsError) console.error('Settings migration error:', settingsError);
             }
 
-            // Clear local storage after successful migration
+            // SUCCESS: Clear local storage
             localStorage.removeItem('tradingJournalEntries');
+            localStorage.removeItem('tradingJournalSetups');
             localStorage.removeItem('tradingJournalCriteria');
             localStorage.removeItem('tradingJournalAchievements');
 
-            if (!isSilent) {
-                alert('Migration Complete! Your local data is now in the cloud.');
-                window.location.reload();
-            } else {
-                console.log('Silent migration complete. Data is now in the cloud.');
-                // For silent migration, we might want to refresh data in state without reload
-                // but window.location.reload() is safest to ensure all hooks pick up fresh cloud data
-                window.location.reload();
-            }
+            console.log('Migration successful. Refreshing...');
+            window.location.reload();
         } catch (e) {
-            console.error('Migration failed', e);
+            console.error('Migration failed deeply:', e);
             if (!isSilent) alert('Migration failed. See console for details.');
         } finally {
             if (!isSilent) setIsLoading(false);
