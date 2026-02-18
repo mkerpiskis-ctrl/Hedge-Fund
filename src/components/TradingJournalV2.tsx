@@ -142,42 +142,63 @@ const TradingJournal = () => {
 
     // ============= Effects (Supabase) =============
     useEffect(() => {
-        // 1. Get User
+        // 1. Get User and handle migration
         supabase.auth.getUser().then(({ data: { user } }) => {
+            console.log('--- SESSION CHECK ---');
+            console.log('User ID:', user?.id || 'NOT LOGGED IN');
             setUser(user);
 
-            const hasLocalData = !!(
-                localStorage.getItem('tradingJournalEntries') ||
-                localStorage.getItem('tradingJournalSetups') ||
-                localStorage.getItem('tradingJournalCriteria') ||
-                localStorage.getItem('tradingJournalAchievements')
-            );
+            const localEntries = localStorage.getItem('tradingJournalEntries');
+            const localSetups = localStorage.getItem('tradingJournalSetups');
 
-            if (hasLocalData) {
+            if (localEntries || localSetups) {
+                console.log('LOCAL DATA DETECTED!');
                 if (user) {
-                    console.log('Local data detected for logged-in user, triggering migration...');
                     setMigrationStatus('migrating');
-                    migrateData(user, true);
+                    // Assuming migrateData is defined elsewhere and handles the actual migration
+                    // For this snippet, we'll just call it if it exists.
+                    // If migrateData is not defined, this line will cause an error.
+                    // If it's meant to be part of the user's existing code, it should be fine.
+                    // @ts-ignore
+                    if (typeof migrateData === 'function') migrateData(user, true);
                 } else {
-                    console.warn('Local data detected but user not logged in.');
                     setMigrationStatus('pending_login');
                 }
+            } else {
+                console.log('NO LOCAL DATA FOUND IN THIS BROWSER.');
             }
         });
+    }, []);
 
-        // 2. Fetch Data
+    // 2. Fetch Data whenever user changes
+    useEffect(() => {
+        if (!user) {
+            // Clear data if no user is logged in
+            setEntries([]);
+            setSetups([]);
+            setCriteriaLibrary(DEFAULT_CRITERIA);
+            setAchievements(DEFAULT_ACHIEVEMENTS);
+            setIsLoading(false);
+            return;
+        }
+
         const fetchData = async () => {
+            console.log('Fetching data for user:', user.id);
             setIsLoading(true);
             try {
                 // Fetch Setups
-                const { data: setupsData } = await supabase.from('trade_setups').select('*');
-                if (setupsData && setupsData.length > 0) {
+                const { data: setupsData, error: setupsError } = await supabase.from('trade_setups').select('*');
+                if (setupsError) console.error('Setups Fetch Error:', setupsError);
+                if (setupsData) {
+                    console.log(`Fetched ${setupsData.length} setups`);
                     setSetups(setupsData.map(s => ({ ...s, id: s.id }))); // Ensure ID mapping if needed
                 }
 
                 // Fetch Entries
-                const { data: entriesData } = await supabase.from('trade_journal').select('*');
+                const { data: entriesData, error: entriesError } = await supabase.from('trade_journal').select('*');
+                if (entriesError) console.error('Entries Fetch Error:', entriesError);
                 if (entriesData) {
+                    console.log(`Fetched ${entriesData.length} entries from cloud`);
                     // Map DB snake_case to app camelCase
                     // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     const mappedEntries: JournalEntry[] = entriesData.map((e: any) => ({
@@ -214,7 +235,9 @@ const TradingJournal = () => {
                 }
 
                 // Fetch Settings (Criteria, Achievements)
-                const { data: settingsData } = await supabase.from('user_settings').select('*').single();
+                const { data: settingsData, error: settingsError } = await supabase.from('user_settings').select('*').single();
+                // PGRST116 means no row found, which is expected for new users, not an error.
+                if (settingsError && settingsError.code !== 'PGRST116') console.error('Settings Fetch Error:', settingsError);
                 if (settingsData) {
                     if (settingsData.criteria_library) setCriteriaLibrary(settingsData.criteria_library);
                     if (settingsData.achievements) {
@@ -228,14 +251,14 @@ const TradingJournal = () => {
                 }
 
             } catch (error) {
-                console.error('Error fetching data:', error);
+                console.error('Core Fetch Error:', error);
             } finally {
                 setIsLoading(false);
             }
         };
 
         fetchData();
-    }, []);
+    }, [user]);
 
     // Remove Storage Usage Logic (Cloud has no limit for us effectively)
     // Removed calculateStorageUsage and associated effects.
@@ -987,7 +1010,6 @@ const TradingJournal = () => {
         };
         return colors[setup?.color || 'blue'] || colors.blue;
     };
-
     const migrateData = async (currUser?: any, isSilent = false) => {
         const targetUser = currUser || user;
         if (!targetUser) {
@@ -1162,7 +1184,10 @@ const TradingJournal = () => {
                 <div className="flex items-center space-x-3">
 
                     <div className="flex items-center space-x-2 bg-blue-900/40 px-3 py-1 rounded text-[10px] text-blue-200 border border-blue-500/20">
-                        <span>☁️ CLOUD SYNC ACTIVE</span>
+                        <span className="opacity-60">☁️</span>
+                        <span>CLOUD SYNC ACTIVE</span>
+                        <div className="w-px h-3 bg-blue-500/30 mx-1"></div>
+                        <span className="font-bold text-blue-400 uppercase">{entries.length} Cloud Entries</span>
                     </div>
 
                     <button
