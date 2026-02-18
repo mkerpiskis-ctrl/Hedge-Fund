@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
+import { supabase } from '../supabaseClient';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
 
 // ============= Types =============
@@ -88,53 +89,16 @@ const FUTURES_SYMBOLS: Record<string, { pointValue: number, commission: number }
 
 const TradingJournal = () => {
     // ============= State =============
-    const [entries, setEntries] = useState<JournalEntry[]>(() => {
-        const saved = localStorage.getItem('tradingJournalEntries');
-        if (!saved) return [];
-        const parsed = JSON.parse(saved);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        return parsed.map((e: any) => {
-            if (Array.isArray(e.criteriaUsed)) {
-                return { ...e, criteriaUsed: { htf: e.criteriaUsed, ltf: [], etf: [] } };
-            }
-            return e;
-        });
-    });
+    const [entries, setEntries] = useState<JournalEntry[]>([]);
+    const [setups, setSetups] = useState<SetupCategory[]>(DEFAULT_SETUPS);
+    const [criteriaLibrary, setCriteriaLibrary] = useState<{ htf: string[], ltf: string[], etf: string[] }>(DEFAULT_CRITERIA);
+    const [achievements, setAchievements] = useState<Achievement[]>(DEFAULT_ACHIEVEMENTS);
+    const [isLoading, setIsLoading] = useState(true);
 
-    const [setups, setSetups] = useState<SetupCategory[]>(() => {
-        const saved = localStorage.getItem('tradingJournalSetups');
-        if (!saved) return DEFAULT_SETUPS;
-        const parsed = JSON.parse(saved);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        return parsed.map((s: any) => {
-            // Migration: Ensure criteria structure and checklist exist
-            const criteria = Array.isArray(s.criteria) ? { htf: s.criteria, ltf: [], etf: [] } : s.criteria;
-            const checklist = s.checklist || [];
-            return { ...s, criteria, checklist };
-        });
-    });
+    // Migration / Auth State
+    const [user, setUser] = useState<any>(null);
 
     const [activeSubTab, setActiveSubTab] = useState<'history' | 'totalStats' | 'setupStats'>('history');
-
-    const [criteriaLibrary, setCriteriaLibrary] = useState<{ htf: string[], ltf: string[], etf: string[] }>(() => {
-        const saved = localStorage.getItem('tradingJournalCriteria');
-        if (!saved) return DEFAULT_CRITERIA;
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-            return { htf: parsed, ltf: [], etf: [] };
-        }
-        return parsed;
-    });
-
-    const [achievements, setAchievements] = useState<Achievement[]>(() => {
-        const saved = localStorage.getItem('tradingJournalAchievements');
-        if (!saved) return DEFAULT_ACHIEVEMENTS;
-        const parsed = JSON.parse(saved);
-        return DEFAULT_ACHIEVEMENTS.map(def => {
-            const savedAch = parsed.find((p: Achievement) => p.id === def.id);
-            return savedAch ? { ...def, unlocked: savedAch.unlocked, date: savedAch.date } : def;
-        });
-    });
 
     // Filters
     const [filterSetup, setFilterSetup] = useState<string>('all');
@@ -149,15 +113,15 @@ const TradingJournal = () => {
     const [imageModal, setImageModal] = useState<{ src: string; zoom: number; x: number; y: number } | null>(null);
     const dragRef = useRef({ startX: 0, startY: 0, lastX: 0, lastY: 0, isDragging: false });
 
+
     // Setup Manager State
     const [newSetupName, setNewSetupName] = useState('');
     const [newCriteria, setNewCriteria] = useState('');
 
-
     // Form state
     const [formData, setFormData] = useState({
         date: new Date().toISOString().split('T')[0],
-        time: new Date().toTimeString().slice(0, 5),
+        time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
         symbol: 'MES',
         direction: 'Long' as 'Long' | 'Short', // Default Direction
         tickValue: '1.25', // Default MES Tick Value
@@ -175,22 +139,88 @@ const TradingJournal = () => {
         images: { htf: null, ltf: null, etf: null } as { htf: string | null, ltf: string | null, etf: string | null },
     });
 
-    // ============= Effects =============
+    // ============= Effects (Supabase) =============
     useEffect(() => {
-        localStorage.setItem('tradingJournalEntries', JSON.stringify(entries));
-    }, [entries]);
+        // 1. Get User
+        supabase.auth.getUser().then(({ data: { user } }) => {
+            setUser(user);
+        });
 
-    useEffect(() => {
-        localStorage.setItem('tradingJournalSetups', JSON.stringify(setups));
-    }, [setups]);
+        // 2. Fetch Data
+        const fetchData = async () => {
+            setIsLoading(true);
+            try {
+                // Fetch Setups
+                const { data: setupsData } = await supabase.from('trade_setups').select('*');
+                if (setupsData && setupsData.length > 0) {
+                    setSetups(setupsData.map(s => ({ ...s, id: s.id }))); // Ensure ID mapping if needed
+                }
 
-    useEffect(() => {
-        localStorage.setItem('tradingJournalCriteria', JSON.stringify(criteriaLibrary));
-    }, [criteriaLibrary]);
+                // Fetch Entries
+                const { data: entriesData } = await supabase.from('trade_journal').select('*');
+                if (entriesData) {
+                    // Map DB snake_case to app camelCase
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    const mappedEntries: JournalEntry[] = entriesData.map((e: any) => ({
+                        id: e.id,
+                        date: e.entry_date,
+                        time: e.entry_time,
+                        symbol: e.symbol,
+                        direction: e.direction,
+                        result: e.result,
+                        pnl: e.pnl,
+                        rMultiple: e.r_multiple || 0,
 
-    useEffect(() => {
-        localStorage.setItem('tradingJournalAchievements', JSON.stringify(achievements));
-    }, [achievements]);
+                        // Map JSON/Structure back
+                        entry: e.entry_price || 0,
+                        exit: e.exit_price || 0,
+                        stopLoss: e.stop_loss || 0,
+                        takeProfit: e.take_profit || 0,
+                        quantity: e.quantity || 0,
+                        setupId: e.setup_id || '',
+
+                        criteriaUsed: e.criteria_used || { htf: [], ltf: [], etf: [] },
+                        images: e.images || { htf: null, ltf: null, etf: null },
+                        notes: e.notes || '',
+
+                        // Calc fields not in DB (or redo calc)
+                        tickValue: 0, // Need to store or infer? Assuming defaults for now or store in data json
+                        tickSize: 0,
+                        mfePrice: 0,
+                        maxMovePoints: 0,
+                        commissions: 0,
+                        pnlPercent: 0,
+                    }));
+                    setEntries(mappedEntries);
+                }
+
+                // Fetch Settings (Criteria, Achievements)
+                const { data: settingsData } = await supabase.from('user_settings').select('*').single();
+                if (settingsData) {
+                    if (settingsData.criteria_library) setCriteriaLibrary(settingsData.criteria_library);
+                    if (settingsData.achievements) {
+                        // Merge unlocked status
+                        setAchievements(prev => prev.map(def => {
+                            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                            const saved = (settingsData.achievements as any[]).find((a: any) => a.id === def.id);
+                            return saved ? { ...def, unlocked: saved.unlocked, date: saved.date } : def;
+                        }));
+                    }
+                }
+
+            } catch (error) {
+                console.error('Error fetching data:', error);
+            } finally {
+                setIsLoading(false);
+            }
+        };
+
+        fetchData();
+    }, []);
+
+    // Remove Storage Usage Logic (Cloud has no limit for us effectively)
+    // Removed calculateStorageUsage and associated effects.
+
 
     const [checklistProgress, setChecklistProgress] = useState<string[]>([]);
 
@@ -255,7 +285,7 @@ const TradingJournal = () => {
         const losses = entriesToCalc.filter(e => e.result === 'LOSS').length;
         const winRate = totalTrades > 0 ? (wins / totalTrades) * 100 : 0;
         const totalPnl = entriesToCalc.reduce((sum, e) => sum + e.pnl, 0);
-        const totalPnlPercent = entriesToCalc.reduce((sum, e) => sum + e.pnlPercent, 0); // Not strictly accurate summation but indicative
+        // const totalPnlPercent = entriesToCalc.reduce((sum, e) => sum + e.pnlPercent, 0); // Removed unused
         const avgR = totalTrades > 0 ? entriesToCalc.reduce((sum, e) => sum + e.rMultiple, 0) / totalTrades : 0;
         const avgWinR = wins > 0 ? entriesToCalc.filter(e => e.result === 'WIN').reduce((sum, e) => sum + e.rMultiple, 0) / wins : 0;
         const avgLossR = losses > 0 ? entriesToCalc.filter(e => e.result === 'LOSS').reduce((sum, e) => sum + Math.abs(e.rMultiple), 0) / losses : 0;
@@ -263,7 +293,7 @@ const TradingJournal = () => {
             ? entriesToCalc.filter(e => e.result === 'WIN').reduce((sum, e) => sum + e.pnl, 0) / Math.abs(entriesToCalc.filter(e => e.result === 'LOSS').reduce((sum, e) => sum + e.pnl, 0))
             : (wins > 0 ? 999 : 0);
 
-        return { totalTrades, wins, losses, winRate, totalPnl, totalPnlPercent, avgR, avgWinR, avgLossR, profitFactor };
+        return { totalTrades, wins, losses, winRate, totalPnl, avgR, avgWinR, avgLossR, profitFactor };
     }, []);
 
     // Filtered entries helper (Memoized)
@@ -525,7 +555,21 @@ const TradingJournal = () => {
         }));
     };
 
-    const handleSubmit = () => {
+    const handleSubmit = async () => {
+        if (!user) {
+            alert('Please sign in to save trades.');
+            return;
+        }
+
+        // Validation: Check Checklist
+        const setup = setups.find(s => s.id === formData.setupId);
+        if (setup && setup.checklist && setup.checklist.length > 0) {
+            const isComplete = setup.checklist.every(item => checklistProgress.includes(item));
+            if (!isComplete) {
+                alert('Please complete the Trading Plan checklist before logging the trade.');
+                return;
+            }
+        }
 
         const entry = parseFloat(formData.entry) || 0;
         const exit = parseFloat(formData.exit) || 0;
@@ -555,10 +599,7 @@ const TradingJournal = () => {
             riskPerContract = Math.abs(stopLoss - entry);
         }
 
-        // Ensure R is signed correctly? Usually R is positive for wins, negative for losses.
-        // Or R-Multiple is a ratio. Ratio of Profit/Risk. 
-        // If PnL > 0, +R. If PnL < 0, -R.
-        // Theoretical R based on Exit:
+        // Expectancy calc...
         const rewardPerContract = Math.abs(priceDiff);
         let rMultiple = (riskPerContract > 0) ? (rewardPerContract / riskPerContract) : 0;
         if (pnl < 0) rMultiple = -rMultiple;
@@ -567,11 +608,9 @@ const TradingJournal = () => {
         if (pnl > 0) result = 'WIN';
         else if (pnl < 0) result = 'LOSS';
 
-        // PnL Percent (ROI on Margin?) -> Futures ROI is based on Margin, but we don't track margin. 
-        // Just use price % change?
-        const pnlPercent = entry > 0 ? (priceDiff / entry) * 100 : 0;
+        // const pnlPercent = entry > 0 ? (priceDiff / entry) * 100 : 0; // Unused
 
-        // Max Move Points (for stats)
+        // Max Move
         let maxMovePoints = 0;
         if (!isNaN(mfePrice) && mfePrice !== 0) {
             if (formData.direction === 'Long') {
@@ -579,42 +618,58 @@ const TradingJournal = () => {
             } else {
                 maxMovePoints = entry - mfePrice;
             }
-            if (maxMovePoints < 0) maxMovePoints = 0; // MFE implies favorable
+            if (maxMovePoints < 0) maxMovePoints = 0;
         }
 
-        const newEntry: JournalEntry = {
-            id: editingEntry?.id || `entry_${Date.now()}`,
-            date: formData.date,
-            time: formData.time,
+        // Prepare DB Object
+        const dbEntry = {
+            user_id: user.id,
+            entry_date: formData.date,
+            entry_time: formData.time,
             symbol: formData.symbol.toUpperCase(),
             direction: formData.direction,
-            tickValue,
-            tickSize,
-            setupId: formData.setupId,
-            criteriaUsed: formData.criteriaUsed,
-            entry,
-            exit,
-            stopLoss,
-            takeProfit: parseFloat(formData.takeProfit) || 0,
-            mfePrice: mfePrice || 0,
-            maxMovePoints,
-            quantity,
-            commissions,
-            pnl,
-            pnlPercent,
-            rMultiple,
             result,
+            pnl,
+            r_multiple: rMultiple,
+
+            entry_price: entry,
+            exit_price: exit,
+            stop_loss: stopLoss,
+            take_profit: parseFloat(formData.takeProfit) || 0,
+            quantity,
+
+            setup_id: formData.setupId || null,
+            criteria_used: formData.criteriaUsed,
             images: formData.images,
-            notes: formData.notes,
+            notes: formData.notes
         };
 
-        if (editingEntry) {
-            setEntries(prev => prev.map(e => e.id === editingEntry.id ? newEntry : e));
-        } else {
-            setEntries(prev => [newEntry, ...prev]);
-        }
+        try {
+            if (editingEntry) {
+                // Update
+                const { error } = await supabase.from('trade_journal').update(dbEntry).eq('id', editingEntry.id);
+                if (error) throw error;
 
-        resetForm();
+                // Update Local State for immediate UI feedback
+                setEntries(prev => prev.map(e => e.id === editingEntry.id ? { ...e, ...formData } as any : e)); // Rough cast to update UI, ideally re-fetch
+            } else {
+                // Insert
+                const { error } = await supabase.from('trade_journal').insert([dbEntry]);
+                if (error) throw error;
+            }
+
+            // Re-fetch to normalize
+            // Re-fetch to normalize
+            // const { data: entriesData } = await supabase.from('trade_journal').select('*');
+            // (Wait for refresh or standard re-fetch)
+            // (Wait for refresh or standard re-fetch)
+            alert('Trade Saved to Cloud!');
+            resetForm();
+            window.location.reload(); // Simple reload to refresh list for now
+        } catch (e) {
+            console.error('Save failed', e);
+            alert('Failed to save to cloud: ' + (e as any).message);
+        }
     };
 
     const resetForm = () => {
@@ -713,73 +768,190 @@ const TradingJournal = () => {
         setShowNewEntry(true);
     };
 
-    const deleteEntry = (id: string) => {
-        if (confirm('Delete this journal entry?')) {
+    const deleteEntry = async (id: string) => {
+        if (!confirm('Delete this journal entry?')) return;
+
+        try {
+            const { error } = await supabase.from('trade_journal').delete().eq('id', id);
+            if (error) throw error;
             setEntries(prev => prev.filter(e => e.id !== id));
+        } catch (e) {
+            console.error('Failed to delete entry', e);
+            alert('Failed to delete entry');
         }
     };
 
-    const addSetup = () => {
-        if (!newSetupName.trim()) return;
-        const newSetup: SetupCategory = {
-            id: `setup_${Date.now()}`,
+    const addSetup = async () => {
+        if (!newSetupName.trim() || !user) return;
+
+        const newSetup = {
+            user_id: user.id,
             name: newSetupName.trim(),
             criteria: { htf: [], ltf: [], etf: [] },
             checklist: [],
             color: ['blue', 'purple', 'emerald', 'amber', 'rose', 'cyan'][Math.floor(Math.random() * 6)],
         };
-        setSetups(prev => [...prev, newSetup]);
-        setNewSetupName('');
+
+        try {
+            const { data, error } = await supabase.from('trade_setups').insert([newSetup]).select().single();
+            if (error) throw error;
+            setSetups(prev => [...prev, { ...newSetup, id: data.id }]);
+            setNewSetupName('');
+        } catch (e) {
+            console.error('Failed to add setup', e);
+            alert('Failed to add setup');
+        }
     };
 
-    const deleteSetup = (id: string) => {
-        setSetups(prev => prev.filter(s => s.id !== id));
+    const deleteSetup = async (id: string) => {
+        if (!confirm('Delete this setup?')) return;
+        try {
+            const { error } = await supabase.from('trade_setups').delete().eq('id', id);
+            if (error) throw error;
+            setSetups(prev => prev.filter(s => s.id !== id));
+        } catch (e) {
+            console.error('Failed to delete setup', e);
+            alert('Failed to delete setup');
+        }
     };
 
-    const addCriteriaToSetup = (setupId: string, criteria: string, category: 'htf' | 'ltf' | 'etf' = 'htf') => {
+    const addCriteriaToSetup = async (setupId: string, criteria: string, category: 'htf' | 'ltf' | 'etf' = 'htf') => {
         if (!criteria.trim()) return;
-        setSetups(prev => prev.map(s => {
-            if (s.id !== setupId) return s;
-            const currentCat = s.criteria[category] || [];
-            if (currentCat.includes(criteria)) return s;
-            return {
-                ...s,
-                criteria: {
-                    ...s.criteria,
-                    [category]: [...currentCat, criteria]
-                }
-            };
-        }));
-        setNewCriteria('');
+
+        const setup = setups.find(s => s.id === setupId);
+        if (!setup) return;
+
+        const currentCat = setup.criteria[category] || [];
+        if (currentCat.includes(criteria)) return;
+
+        const updatedCriteria = {
+            ...setup.criteria,
+            [category]: [...currentCat, criteria]
+        };
+
+        try {
+            const { error } = await supabase.from('trade_setups').update({ criteria: updatedCriteria }).eq('id', setupId);
+            if (error) throw error;
+
+            setSetups(prev => prev.map(s => {
+                if (s.id !== setupId) return s;
+                return { ...s, criteria: updatedCriteria };
+            }));
+            setNewCriteria('');
+        } catch (e) {
+            console.error('Failed to update setup criteria', e);
+        }
     };
 
-    const removeCriteriaFromSetup = (setupId: string, criteria: string, category: 'htf' | 'ltf' | 'etf') => {
-        setSetups(prev => prev.map(s => {
-            if (s.id !== setupId) return s;
-            return {
-                ...s,
-                criteria: {
-                    ...s.criteria,
-                    [category]: (s.criteria[category] || []).filter(c => c !== criteria)
-                }
-            };
-        }));
+    const removeCriteriaFromSetup = async (setupId: string, criteria: string, category: 'htf' | 'ltf' | 'etf') => {
+        const setup = setups.find(s => s.id === setupId);
+        if (!setup) return;
+
+        const updatedCriteria = {
+            ...setup.criteria,
+            [category]: (setup.criteria[category] || []).filter(c => c !== criteria)
+        };
+
+        try {
+            const { error } = await supabase.from('trade_setups').update({ criteria: updatedCriteria }).eq('id', setupId);
+            if (error) throw error;
+
+            setSetups(prev => prev.map(s => {
+                if (s.id !== setupId) return s;
+                return { ...s, criteria: updatedCriteria };
+            }));
+        } catch (e) {
+            console.error('Failed to remove setup criteria', e);
+        }
     };
 
-    const addChecklistToSetup = (setupId: string, item: string) => {
+    const addChecklistToSetup = async (setupId: string, item: string) => {
         if (!item.trim()) return;
-        setSetups(prev => prev.map(s => {
-            if (s.id !== setupId) return s;
-            if (s.checklist.includes(item)) return s;
-            return { ...s, checklist: [...s.checklist, item] };
-        }));
+
+        const setup = setups.find(s => s.id === setupId);
+        if (!setup) return;
+        if (setup.checklist.includes(item)) return;
+
+        const updatedChecklist = [...setup.checklist, item];
+
+        try {
+            const { error } = await supabase.from('trade_setups').update({ checklist: updatedChecklist }).eq('id', setupId);
+            if (error) throw error;
+
+            setSetups(prev => prev.map(s => {
+                if (s.id !== setupId) return s;
+                return { ...s, checklist: updatedChecklist };
+            }));
+        } catch (e) {
+            console.error('Failed to update setup checklist', e);
+        }
     };
 
-    const removeChecklistFromSetup = (setupId: string, item: string) => {
-        setSetups(prev => prev.map(s => {
-            if (s.id !== setupId) return s;
-            return { ...s, checklist: s.checklist.filter(i => i !== item) };
-        }));
+    const removeChecklistFromSetup = async (setupId: string, item: string) => {
+        const setup = setups.find(s => s.id === setupId);
+        if (!setup) return;
+
+        const updatedChecklist = setup.checklist.filter(i => i !== item);
+
+        try {
+            const { error } = await supabase.from('trade_setups').update({ checklist: updatedChecklist }).eq('id', setupId);
+            if (error) throw error;
+
+            setSetups(prev => prev.map(s => {
+                if (s.id !== setupId) return s;
+                return { ...s, checklist: updatedChecklist };
+            }));
+        } catch (e) {
+            console.error('Failed to remove checklist item', e);
+        }
+    };
+
+    const addGlobalCriteria = async (cat: 'htf' | 'ltf' | 'etf', value: string) => {
+        if (!value.trim() || !user) return;
+
+        const currentList = criteriaLibrary[cat] || [];
+        if (currentList.includes(value.trim())) return;
+
+        const newLibrary = {
+            ...criteriaLibrary,
+            [cat]: [...currentList, value.trim()]
+        };
+
+        try {
+            const { error } = await supabase.from('user_settings').upsert({
+                user_id: user.id,
+                criteria_library: newLibrary
+            }, { onConflict: 'user_id' });
+
+            if (error) throw error;
+            setCriteriaLibrary(newLibrary);
+            setNewCriteria('');
+        } catch (e) {
+            console.error('Failed to update criteria library', e);
+            alert('Failed to save criteria');
+        }
+    };
+
+    const removeGlobalCriteria = async (cat: 'htf' | 'ltf' | 'etf', value: string) => {
+        if (!user) return;
+
+        const newLibrary = {
+            ...criteriaLibrary,
+            [cat]: (criteriaLibrary[cat] || []).filter(c => c !== value)
+        };
+
+        try {
+            const { error } = await supabase.from('user_settings').upsert({
+                user_id: user.id,
+                criteria_library: newLibrary
+            }, { onConflict: 'user_id' });
+
+            if (error) throw error;
+            setCriteriaLibrary(newLibrary);
+        } catch (e) {
+            console.error('Failed to update criteria library', e);
+            alert('Failed to save criteria');
+        }
     };
 
     const getSetupById = (id: string) => setups.find(s => s.id === id);
@@ -797,6 +969,63 @@ const TradingJournal = () => {
         return colors[setup?.color || 'blue'] || colors.blue;
     };
 
+    const migrateData = async () => {
+        if (!user) return;
+        if (!confirm('This will upload your local data (Entries, Criteria, Achievements) to Cloud Storage. This may overwrite existing cloud settings. Continue?')) return;
+
+        setIsLoading(true);
+        try {
+            // 1. Migrate Entries
+            const localEntriesStr = localStorage.getItem('tradingJournalEntries');
+            if (localEntriesStr) {
+                const localEntries = JSON.parse(localEntriesStr);
+                const dbEntries = localEntries.map((e: any) => ({
+                    user_id: user.id,
+                    entry_date: e.date,
+                    entry_time: e.time,
+                    symbol: e.symbol,
+                    direction: e.direction,
+                    result: e.result,
+                    pnl: e.pnl,
+                    r_multiple: e.r_multiple || e.rMultiple || 0,
+                    entry_price: e.entry || 0,
+                    exit_price: e.exit || 0,
+                    stop_loss: e.stop_loss || e.stopLoss || 0,
+                    take_profit: e.take_profit || e.takeProfit || 0,
+                    quantity: e.quantity || 0,
+                    setup_id: e.setupId || '',
+                    criteria_used: e.criteria_used || e.criteriaUsed || {},
+                    images: e.images || {},
+                    notes: e.notes || ''
+                }));
+
+                const { error: entryError } = await supabase.from('trade_journal').insert(dbEntries);
+                if (entryError) console.warn('Entry migration partial issue:', entryError);
+            }
+
+            // 2. Migrate Criteria & Achievements
+            const localCriteriaStr = localStorage.getItem('tradingJournalCriteria');
+            const localAchievementsStr = localStorage.getItem('tradingJournalAchievements');
+
+            if (localCriteriaStr || localAchievementsStr) {
+                const updates: any = { user_id: user.id };
+                if (localCriteriaStr) updates.criteria_library = JSON.parse(localCriteriaStr);
+                if (localAchievementsStr) updates.achievements = JSON.parse(localAchievementsStr);
+
+                const { error: settingsError } = await supabase.from('user_settings').upsert(updates, { onConflict: 'user_id' });
+                if (settingsError) throw settingsError;
+            }
+
+            alert('Migration Complete! Your local data is now in the cloud.');
+            window.location.reload();
+        } catch (e) {
+            console.error('Migration failed', e);
+            alert('Migration failed. See console for details.');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
     // Helper to render stat card
     const StatCard = ({ title, value, type = 'neutral', subtext = '' }: { title: string, value: string, type?: 'win' | 'loss' | 'neutral', subtext?: string }) => (
         <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700 text-center">
@@ -812,6 +1041,11 @@ const TradingJournal = () => {
     console.log('TradingJournal v2.5.1-FORCE loaded');
     return (
         <div className="space-y-6">
+            {isLoading && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm">
+                    <div className="text-amber-500 text-xl font-bold animate-pulse">Loading Journal Data...</div>
+                </div>
+            )}
             {/* Header */}
             <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-3">
@@ -822,6 +1056,20 @@ const TradingJournal = () => {
                     </div>
                 </div>
                 <div className="flex items-center space-x-3">
+
+                    <div className="flex items-center space-x-2 bg-blue-900/40 px-3 py-1 rounded text-[10px] text-blue-200 border border-blue-500/20">
+                        <span>☁️ CLOUD SYNC ACTIVE</span>
+                    </div>
+
+                    {user && localStorage.getItem('tradingJournalEntries') && (
+                        <button
+                            onClick={migrateData}
+                            className="px-3 py-1 text-[10px] bg-purple-600 hover:bg-purple-500 text-white rounded border border-purple-400 shadow-lg shadow-purple-500/20 animate-pulse"
+                        >
+                            ⬆️ Migrate Local Data
+                        </button>
+                    )}
+
                     <button
                         onClick={() => setShowSetupManager(!showSetupManager)}
                         className="px-3 py-2 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg border border-slate-600"
@@ -1468,14 +1716,7 @@ const TradingJournal = () => {
                                             {(['htf', 'ltf', 'etf'] as const).map(cat => (
                                                 <button
                                                     key={cat}
-                                                    onClick={() => {
-                                                        if (!newCriteria.trim()) return;
-                                                        setCriteriaLibrary(prev => ({
-                                                            ...prev,
-                                                            [cat]: [...(prev[cat] || []), newCriteria.trim()]
-                                                        }));
-                                                        setNewCriteria('');
-                                                    }}
+                                                    onClick={() => addGlobalCriteria(cat, newCriteria)}
                                                     className={`px-3 py-2 text-[10px] font-bold rounded uppercase transition-colors ${cat === 'htf' ? 'bg-blue-600/20 text-blue-400 hover:bg-blue-600/40' :
                                                         cat === 'ltf' ? 'bg-purple-600/20 text-purple-400 hover:bg-purple-600/40' :
                                                             'bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/40'
@@ -1501,10 +1742,7 @@ const TradingJournal = () => {
                                                             <span key={c} className="px-2 py-1 bg-slate-800 text-slate-400 text-[10px] rounded border border-slate-700 flex items-center gap-1 group">
                                                                 {c}
                                                                 <button
-                                                                    onClick={() => setCriteriaLibrary(prev => ({
-                                                                        ...prev,
-                                                                        [cat]: prev[cat].filter(x => x !== c)
-                                                                    }))}
+                                                                    onClick={() => removeGlobalCriteria(cat, c)}
                                                                     className="text-slate-600 hover:text-rose-400 opacity-0 group-hover:opacity-100 transition-opacity"
                                                                 >
                                                                     ✕
