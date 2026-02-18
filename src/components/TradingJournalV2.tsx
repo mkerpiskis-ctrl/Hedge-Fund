@@ -109,8 +109,6 @@ const TradingJournal = () => {
     // UI State
     const [showNewEntry, setShowNewEntry] = useState(false);
     const [showSetupManager, setShowSetupManager] = useState(false);
-    const [showManualImport, setShowManualImport] = useState(false);
-    const [importJson, setImportJson] = useState('');
     const [editingEntry, setEditingEntry] = useState<JournalEntry | null>(null);
     const [imageModal, setImageModal] = useState<{ src: string; zoom: number; x: number; y: number } | null>(null);
     const dragRef = useRef({ startX: 0, startY: 0, lastX: 0, lastY: 0, isDragging: false });
@@ -146,6 +144,16 @@ const TradingJournal = () => {
         // 1. Get User
         supabase.auth.getUser().then(({ data: { user } }) => {
             setUser(user);
+
+            // Auto-migrate local data if found after login
+            if (user && (
+                localStorage.getItem('tradingJournalEntries') ||
+                localStorage.getItem('tradingJournalCriteria') ||
+                localStorage.getItem('tradingJournalAchievements')
+            )) {
+                console.log('Local data detected, triggering silent migration...');
+                migrateData(user, true);
+            }
         });
 
         // 2. Fetch Data
@@ -971,18 +979,22 @@ const TradingJournal = () => {
         return colors[setup?.color || 'blue'] || colors.blue;
     };
 
-    const migrateData = async () => {
-        if (!user) return;
-        if (!confirm('This will upload your local data (Entries, Criteria, Achievements) to Cloud Storage. This may overwrite existing cloud settings. Continue?')) return;
+    const migrateData = async (currUser?: any, isSilent = false) => {
+        const targetUser = currUser || user;
+        if (!targetUser) return;
 
-        setIsLoading(true);
+        if (!isSilent) {
+            if (!confirm('This will upload your local data (Entries, Criteria, Achievements) to Cloud Storage. This may overwrite existing cloud settings. Continue?')) return;
+            setIsLoading(true);
+        }
+
         try {
             // 1. Migrate Entries
             const localEntriesStr = localStorage.getItem('tradingJournalEntries');
             if (localEntriesStr) {
                 const localEntries = JSON.parse(localEntriesStr);
                 const dbEntries = localEntries.map((e: any) => ({
-                    user_id: user.id,
+                    user_id: targetUser.id,
                     entry_date: e.date,
                     entry_time: e.time,
                     symbol: e.symbol,
@@ -1010,7 +1022,7 @@ const TradingJournal = () => {
             const localAchievementsStr = localStorage.getItem('tradingJournalAchievements');
 
             if (localCriteriaStr || localAchievementsStr) {
-                const updates: any = { user_id: user.id };
+                const updates: any = { user_id: targetUser.id };
                 if (localCriteriaStr) updates.criteria_library = JSON.parse(localCriteriaStr);
                 if (localAchievementsStr) updates.achievements = JSON.parse(localAchievementsStr);
 
@@ -1018,67 +1030,25 @@ const TradingJournal = () => {
                 if (settingsError) throw settingsError;
             }
 
-            alert('Migration Complete! Your local data is now in the cloud.');
-            window.location.reload();
+            // Clear local storage after successful migration
+            localStorage.removeItem('tradingJournalEntries');
+            localStorage.removeItem('tradingJournalCriteria');
+            localStorage.removeItem('tradingJournalAchievements');
+
+            if (!isSilent) {
+                alert('Migration Complete! Your local data is now in the cloud.');
+                window.location.reload();
+            } else {
+                console.log('Silent migration complete. Data is now in the cloud.');
+                // For silent migration, we might want to refresh data in state without reload
+                // but window.location.reload() is safest to ensure all hooks pick up fresh cloud data
+                window.location.reload();
+            }
         } catch (e) {
             console.error('Migration failed', e);
-            alert('Migration failed. See console for details.');
+            if (!isSilent) alert('Migration failed. See console for details.');
         } finally {
-            setIsLoading(false);
-        }
-    };
-
-    const handleManualImport = async () => {
-        if (!user || !importJson.trim()) return;
-        setIsLoading(true);
-        try {
-            const data = JSON.parse(importJson);
-
-            // 1. Migrate Entries
-            if (data.entries && data.entries.length > 0) {
-                const dbEntries = data.entries.map((e: any) => ({
-                    user_id: user.id,
-                    entry_date: e.date,
-                    entry_time: e.time,
-                    symbol: e.symbol,
-                    direction: e.direction,
-                    result: e.result,
-                    pnl: e.pnl,
-                    r_multiple: e.r_multiple || e.rMultiple || 0,
-                    entry_price: e.entry || e.entry_price || 0,
-                    exit_price: e.exit || e.exit_price || 0,
-                    stop_loss: e.stop_loss || e.stopLoss || 0,
-                    take_profit: e.take_profit || e.takeProfit || 0,
-                    quantity: e.quantity || 0,
-                    setup_id: e.setupId || e.setup_id || '',
-                    criteria_used: e.criteria_used || e.criteriaUsed || {},
-                    images: e.images || {},
-                    notes: e.notes || ''
-                }));
-
-                const { error: entryError } = await supabase.from('trade_journal').insert(dbEntries);
-                if (entryError) console.warn('Entry import partial issue:', entryError);
-            }
-
-            // 2. Migrate Criteria & Achievements
-            if (data.criteria || data.achievements) {
-                const updates: any = { user_id: user.id };
-                if (data.criteria) updates.criteria_library = data.criteria;
-                if (data.achievements) updates.achievements = data.achievements;
-
-                const { error: settingsError } = await supabase.from('user_settings').upsert(updates, { onConflict: 'user_id' });
-                if (settingsError) throw settingsError;
-            }
-
-            alert('Import Complete! Your trades are now in the cloud.');
-            setImportJson('');
-            setShowManualImport(false);
-            window.location.reload();
-        } catch (e) {
-            console.error('Import failed', e);
-            alert('Import failed. Invalid JSON format.');
-        } finally {
-            setIsLoading(false);
+            if (!isSilent) setIsLoading(false);
         }
     };
 
@@ -1116,15 +1086,6 @@ const TradingJournal = () => {
                     <div className="flex items-center space-x-2 bg-blue-900/40 px-3 py-1 rounded text-[10px] text-blue-200 border border-blue-500/20">
                         <span>☁️ CLOUD SYNC ACTIVE</span>
                     </div>
-
-                    {user && localStorage.getItem('tradingJournalEntries') && (
-                        <button
-                            onClick={migrateData}
-                            className="px-3 py-1 text-[10px] bg-purple-600 hover:bg-purple-500 text-white rounded border border-purple-400 shadow-lg shadow-purple-500/20 animate-pulse"
-                        >
-                            ⬆️ Migrate Local Data
-                        </button>
-                    )}
 
                     <button
                         onClick={() => setShowSetupManager(!showSetupManager)}
@@ -1753,42 +1714,6 @@ const TradingJournal = () => {
                         </div>
 
                         <div className="flex-1 overflow-y-auto p-6 space-y-10">
-                            {/* Manual Import Section */}
-                            <div className="bg-purple-900/20 p-5 rounded-xl border border-purple-500/30 mb-8">
-                                <div className="flex items-center justify-between mb-4">
-                                    <h4 className="text-sm font-bold text-purple-400 uppercase flex items-center gap-2">
-                                        <span>🔄</span> Manual Data Recovery
-                                    </h4>
-                                    <button
-                                        onClick={() => setShowManualImport(!showManualImport)}
-                                        className="text-[10px] bg-purple-600/20 hover:bg-purple-600/40 text-purple-300 px-3 py-1 rounded border border-purple-500/30 transition-colors font-bold uppercase"
-                                    >
-                                        {showManualImport ? 'Cancel' : 'Open Import Tool'}
-                                    </button>
-                                </div>
-
-                                {showManualImport && (
-                                    <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
-                                        <p className="text-[10px] text-purple-300/70 leading-relaxed italic">
-                                            If you can't reach the local server to use the "Migrate" button, paste your data backup string below.
-                                            You can get this string by running the recovery script in your old browser console.
-                                        </p>
-                                        <textarea
-                                            value={importJson}
-                                            onChange={(e) => setImportJson(e.target.value)}
-                                            placeholder='Paste your JSON data here (starts with {"entries":[...]})...'
-                                            className="w-full h-32 bg-slate-900 text-slate-300 p-3 rounded-lg border border-purple-500/20 focus:border-purple-500 outline-none text-[10px] font-mono"
-                                        />
-                                        <button
-                                            onClick={handleManualImport}
-                                            disabled={!importJson.trim() || isLoading}
-                                            className="w-full py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-bold rounded-lg text-xs transition-all shadow-lg shadow-purple-900/20"
-                                        >
-                                            {isLoading ? 'Importing...' : 'Confirm Cloud Import'}
-                                        </button>
-                                    </div>
-                                )}
-                            </div>
 
                             {/* Section 1: Global Criteria Library */}
                             <div>
