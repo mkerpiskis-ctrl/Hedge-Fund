@@ -106,10 +106,11 @@ const TradingJournal = () => {
     const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'wtd' | 'mtd'>('all');
     const [showBaseline, setShowBaseline] = useState(false);
 
-    // UI State
     const [showNewEntry, setShowNewEntry] = useState(false);
     const [showSetupManager, setShowSetupManager] = useState(false);
     const [editingEntry, setEditingEntry] = useState<JournalEntry | null>(null);
+    const [migrationStatus, setMigrationStatus] = useState<'idle' | 'pending_login' | 'migrating' | 'error'>('idle');
+    const [migrationError, setMigrationError] = useState<string | null>(null);
     const [imageModal, setImageModal] = useState<{ src: string; zoom: number; x: number; y: number } | null>(null);
     const dragRef = useRef({ startX: 0, startY: 0, lastX: 0, lastY: 0, isDragging: false });
 
@@ -145,14 +146,22 @@ const TradingJournal = () => {
         supabase.auth.getUser().then(({ data: { user } }) => {
             setUser(user);
 
-            // Auto-migrate local data if found after login
-            if (user && (
+            const hasLocalData = !!(
                 localStorage.getItem('tradingJournalEntries') ||
+                localStorage.getItem('tradingJournalSetups') ||
                 localStorage.getItem('tradingJournalCriteria') ||
                 localStorage.getItem('tradingJournalAchievements')
-            )) {
-                console.log('Local data detected, triggering silent migration...');
-                migrateData(user, true);
+            );
+
+            if (hasLocalData) {
+                if (user) {
+                    console.log('Local data detected for logged-in user, triggering migration...');
+                    setMigrationStatus('migrating');
+                    migrateData(user, true);
+                } else {
+                    console.warn('Local data detected but user not logged in.');
+                    setMigrationStatus('pending_login');
+                }
             }
         });
 
@@ -981,12 +990,12 @@ const TradingJournal = () => {
 
     const migrateData = async (currUser?: any, isSilent = false) => {
         const targetUser = currUser || user;
-        if (!targetUser) return;
-
-        if (!isSilent) {
-            if (!confirm('This will upload your local data (Setups, Entries, Criteria, Achievements) to Cloud Storage. This may overwrite existing cloud settings. Continue?')) return;
-            setIsLoading(true);
+        if (!targetUser) {
+            setMigrationStatus('pending_login');
+            return;
         }
+
+        setMigrationStatus('migrating');
 
         try {
             console.log('Migration started...');
@@ -1010,11 +1019,8 @@ const TradingJournal = () => {
                         .select()
                         .single();
 
-                    if (setupError) {
-                        console.error('Setup migration error:', setupError);
-                    } else if (newSetup) {
-                        setupIdMap[s.id] = newSetup.id;
-                    }
+                    if (setupError) console.error('Setup migration error:', setupError);
+                    else if (newSetup) setupIdMap[s.id] = newSetup.id;
                 }
             }
 
@@ -1067,9 +1073,10 @@ const TradingJournal = () => {
 
             console.log('Migration successful. Refreshing...');
             window.location.reload();
-        } catch (e) {
+        } catch (e: any) {
             console.error('Migration failed deeply:', e);
-            if (!isSilent) alert('Migration failed. See console for details.');
+            setMigrationError(e.message || 'Unknown error');
+            setMigrationStatus('error');
         } finally {
             if (!isSilent) setIsLoading(false);
         }
@@ -1087,9 +1094,57 @@ const TradingJournal = () => {
     );
 
     // ============= Render =============
-    console.log('TradingJournal v2.5.1-FORCE loaded');
     return (
         <div className="space-y-6">
+            {/* Migration Overlays */}
+            {migrationStatus === 'pending_login' && (
+                <div className="fixed inset-0 z-[100] bg-slate-900/90 backdrop-blur-md flex items-center justify-center p-6 text-center">
+                    <div className="max-w-md bg-slate-800 p-8 rounded-2xl border border-amber-500/30 shadow-2xl">
+                        <div className="text-4xl mb-4">🔐</div>
+                        <h3 className="text-xl font-bold text-white mb-2">Local Data Detected!</h3>
+                        <p className="text-sm text-slate-400 mb-6 leading-relaxed">
+                            I found your trade history on this machine. To transfer it to the cloud, please <strong>Sign In</strong> using the link in the header.
+                        </p>
+                        <div className="animate-pulse text-amber-500 font-bold text-xs uppercase tracking-widest">
+                            Waiting for login...
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {migrationStatus === 'migrating' && (
+                <div className="fixed inset-0 z-[100] bg-slate-900/90 backdrop-blur-md flex items-center justify-center p-6 text-center">
+                    <div className="max-w-md bg-slate-800 p-8 rounded-2xl border border-blue-500/30 shadow-2xl">
+                        <div className="text-4xl mb-4 animate-bounce">☁️</div>
+                        <h3 className="text-xl font-bold text-white mb-2">Syncing to Cloud...</h3>
+                        <p className="text-sm text-slate-400 mb-6 leading-relaxed">
+                            Moving your setups, entries, and criteria to Supabase. This will only take a moment.
+                        </p>
+                        <div className="flex justify-center">
+                            <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {migrationStatus === 'error' && (
+                <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-md flex items-center justify-center p-6 text-center">
+                    <div className="max-w-md bg-slate-800 p-8 rounded-2xl border border-rose-500/30 shadow-2xl">
+                        <div className="text-4xl mb-4">⚠️</div>
+                        <h3 className="text-xl font-bold text-white mb-2">Migration Failed</h3>
+                        <p className="text-sm text-rose-400/80 mb-6 font-mono text-left bg-black/40 p-3 rounded">
+                            {migrationError || 'An unexpected error occurred.'}
+                        </p>
+                        <button
+                            onClick={() => setMigrationStatus('idle')}
+                            className="px-6 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors"
+                        >
+                            Dismiss
+                        </button>
+                    </div>
+                </div>
+            )}
+
             {isLoading && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm">
                     <div className="text-amber-500 text-xl font-bold animate-pulse">Loading Journal Data...</div>
