@@ -280,7 +280,8 @@ const FireTracker: React.FC = () => {
         }
     };
 
-
+    // Helper for milestone target
+    const floatMilestoneTarget = (t: any) => typeof t === 'number' ? t : parseFloat(t) || 0;
 
     // Derived Stats
     const latestEntry = entries.length > 0 ? entries[0] : null;
@@ -539,37 +540,77 @@ const FireTracker: React.FC = () => {
                                 <span>♡</span> <span>Financial health</span>
                             </h3>
 
-                            <div className="bg-amber-500/10 border border-amber-500/20 p-3 rounded-lg flex items-start space-x-3">
-                                <span className="text-amber-500 text-lg">⚠</span>
-                                <div>
-                                    <div className="text-amber-500 font-bold text-xs">SWR not sufficient yet. Short by ~€{(20856).toLocaleString()}/year.</div>
-                                </div>
-                            </div>
+                            {(() => {
+                                // 1. Calculate Total Contributions (Invested Capital)
+                                const totalInvestedUsd = entries.reduce((sum, e) => sum + (e.contributionMkUsd || 0) + (e.contributionKjUsd || 0), 0);
 
-                            <div className="bg-slate-900/40 p-4 rounded-xl border border-slate-800/50">
-                                <p className="text-xs text-slate-400 italic mb-4">
-                                    <strong className="text-slate-300">SWR Analysis:</strong> At 3.5% withdrawal rate, portfolio has a "safe cash runway" of ~<span className="text-emerald-400 font-bold">29 years</span> (assuming 0% post-retirement growth).
-                                </p>
+                                // 2. Net Gain (Market Value - Invested)
+                                const netGainUsd = currentCapitalUsd - totalInvestedUsd;
 
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="glass-panel p-3 border-slate-800 bg-slate-950/30 text-center">
-                                        <div className="text-[9px] uppercase text-slate-500 font-bold">SWR @ 3.5%</div>
-                                        <div className="text-emerald-400 font-bold mt-1">€262/mo</div>
-                                    </div>
-                                    <div className="glass-panel p-3 border-slate-800 bg-slate-950/30 text-center">
-                                        <div className="text-[9px] uppercase text-slate-500 font-bold">RUNWAY (CASH)</div>
-                                        <div className="text-emerald-400 font-bold mt-1">29 years</div>
-                                    </div>
-                                    <div className="glass-panel p-3 border-slate-800 bg-slate-950/30 text-center">
-                                        <div className="text-[9px] uppercase text-slate-500 font-bold">LONG-TERM CAP GAINS</div>
-                                        <div className="text-emerald-400 font-bold mt-1">$3,938</div>
-                                    </div>
-                                    <div className="glass-panel p-3 border-slate-800 bg-slate-950/30 text-center">
-                                        <div className="text-[9px] uppercase text-slate-500 font-bold">NET GAIN</div>
-                                        <div className="text-emerald-400 font-bold mt-1">$22,312</div>
-                                    </div>
-                                </div>
-                            </div>
+                                // 3. SWR Analysis (Euro based)
+                                const swrRate = 0.035; // 3.5%
+                                const annualSwr = currentCapitalEuro * swrRate;
+                                const monthlySwr = annualSwr / 12;
+
+                                // 4. Target Income & Runway
+                                // Assume the "Retirement" milestone (or next big milestone) defines the target capital for FI.
+                                // If we are "Grinding", target is just the next step. 
+                                // Let's try to find a milestone named "Retirement" or just use the largest target.
+                                const retirementMilestone = milestones.find(m => m.name.toLowerCase().includes('retirement')) || milestones[milestones.length - 1];
+                                const targetCapital = floatMilestoneTarget(retirementMilestone.target);
+                                const targetAnnualIncome = targetCapital * swrRate;
+
+                                const shortfallAnnual = Math.max(0, targetAnnualIncome - annualSwr);
+                                const isSufficient = annualSwr >= targetAnnualIncome;
+
+                                // Runway: How long current capital lasts if we spent the TARGET income (assuming 0% growth)
+                                // This is a "cash runway" measure relative to desired lifestyle.
+                                const runwayYears = targetAnnualIncome > 0 ? (currentCapitalEuro / targetAnnualIncome) : 0;
+
+                                return (
+                                    <>
+                                        <div className={`border p-3 rounded-lg flex items-start space-x-3 ${isSufficient ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-amber-500/10 border-amber-500/20'}`}>
+                                            <span className="text-lg">{isSufficient ? '✓' : '⚠'}</span>
+                                            <div>
+                                                <div className={`${isSufficient ? 'text-emerald-400' : 'text-amber-500'} font-bold text-xs`}>
+                                                    {isSufficient
+                                                        ? 'SWR is sufficient for retirement target!'
+                                                        : `SWR not sufficient yet. Short by ~€${shortfallAnnual.toLocaleString(undefined, { maximumFractionDigits: 0 })}/year.`
+                                                    }
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div className="bg-slate-900/40 p-4 rounded-xl border border-slate-800/50">
+                                            <p className="text-xs text-slate-400 italic mb-4">
+                                                <strong className="text-slate-300">SWR Analysis:</strong> At 3.5% withdrawal rate, portfolio generates <strong>€{monthlySwr.toLocaleString(undefined, { maximumFractionDigits: 0 })}/mo</strong>.
+                                                Target income implied by '{retirementMilestone.name}' is ~€{(targetAnnualIncome / 12).toLocaleString(undefined, { maximumFractionDigits: 0 })}/mo.
+                                            </p>
+
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div className="glass-panel p-3 border-slate-800 bg-slate-950/30 text-center">
+                                                    <div className="text-[9px] uppercase text-slate-500 font-bold">SWR @ 3.5%</div>
+                                                    <div className="text-emerald-400 font-bold mt-1">€{monthlySwr.toLocaleString(undefined, { maximumFractionDigits: 0 })}/mo</div>
+                                                </div>
+                                                <div className="glass-panel p-3 border-slate-800 bg-slate-950/30 text-center">
+                                                    <div className="text-[9px] uppercase text-slate-500 font-bold">RUNWAY (CASH)</div>
+                                                    <div className="text-emerald-400 font-bold mt-1">{runwayYears.toFixed(1)} years</div>
+                                                </div>
+                                                <div className="glass-panel p-3 border-slate-800 bg-slate-950/30 text-center">
+                                                    <div className="text-[9px] uppercase text-slate-500 font-bold">INVESTED</div>
+                                                    <div className="text-slate-300 font-bold mt-1">${totalInvestedUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
+                                                </div>
+                                                <div className="glass-panel p-3 border-slate-800 bg-slate-950/30 text-center">
+                                                    <div className="text-[9px] uppercase text-slate-500 font-bold">NET GAIN</div>
+                                                    <div className={`${netGainUsd >= 0 ? 'text-emerald-400' : 'text-rose-400'} font-bold mt-1`}>
+                                                        {netGainUsd >= 0 ? '+' : '-'}${Math.abs(netGainUsd).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </>
+                                );
+                            })()}
                         </div>
                     </div>
                 )}
