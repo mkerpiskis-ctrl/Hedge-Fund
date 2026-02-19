@@ -57,11 +57,15 @@ export default function EmpireDashboard() {
 
         const loadData = async () => {
             // 1. Business Data
-            const { data: biz } = await supabase
+            const { data: biz, error: bizError } = await supabase
                 .from('business_metrics')
                 .select('*')
                 .eq('user_id', user.id)
                 .order('month', { ascending: true });
+
+            if (bizError) {
+                console.error('Error fetching business metrics:', bizError);
+            }
 
             if (biz) {
                 const mappedBiz: BusinessMetric[] = biz.map((b: any) => ({
@@ -71,22 +75,19 @@ export default function EmpireDashboard() {
                     auc: b.auc,
                     netIncome: b.net_income
                 }));
-                // If empty, maybe add mock? Or just leave empty.
-                if (mappedBiz.length === 0) {
-                    setBusinessData([
-                        { month: '2026-01-01', c2Subs: 8, etoroCopiers: 12, auc: 45000, netIncome: 1250 }
-                    ]);
-                } else {
-                    setBusinessData(mappedBiz);
-                }
+                setBusinessData(mappedBiz);
             }
 
             // 2. Fire Data (Read from DB)
-            const { data: fire } = await supabase
+            const { data: fire, error: fireError } = await supabase
                 .from('fire_entries')
                 .select('*')
                 .eq('user_id', user.id)
                 .order('date', { ascending: false });
+
+            if (fireError) {
+                console.error('Error fetching fire entries:', fireError);
+            }
 
             if (fire) {
                 const mappedFire: FireEntry[] = fire.map((f: any) => ({
@@ -121,14 +122,19 @@ export default function EmpireDashboard() {
         const updatedBiz = [...businessData, newBiz].sort((a, b) => new Date(a.month).getTime() - new Date(b.month).getTime());
         setBusinessData(updatedBiz);
 
-        await supabase.from('business_metrics').upsert({
+        const { error: bizError } = await supabase.from('business_metrics').upsert({
             user_id: user.id,
             month: newBiz.month,
             c2_subs: newBiz.c2Subs,
             etoro_copiers: newBiz.etoroCopiers,
             auc: newBiz.auc,
             net_income: newBiz.netIncome
-        }, { onConflict: 'user_id, month' });
+        }, { onConflict: 'user_id,month' });
+
+        if (bizError) {
+            console.error('Error saving business metrics:', bizError);
+            alert(`Failed to save Business Metrics: ${bizError.message}`);
+        }
 
         // 2. Process Personal Data (FireVault)
         const pUsd = parseFloat(logForm.portfolioUsd) || 0;
@@ -153,7 +159,7 @@ export default function EmpireDashboard() {
         const updatedFire = [newFire, ...fireData].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
         setFireData(updatedFire);
 
-        await supabase.from('fire_entries').insert({
+        const { error: fireError } = await supabase.from('fire_entries').insert({
             user_id: user.id,
             date: newFire.date,
             capital_usd: newFire.capitalUsd,
@@ -163,8 +169,15 @@ export default function EmpireDashboard() {
             fx_rate: newFire.fxRate
         });
 
+        if (fireError) {
+            console.error('Error saving fire entries:', fireError);
+            alert(`Failed to save Fire Entries: ${fireError.message}`);
+        }
+
         setLogModalOpen(false);
-        alert('Month Logged Successfully!');
+        if (!bizError && !fireError) {
+            alert('Month Logged Successfully!');
+        }
     };
 
     const handleDeleteBizEntry = async (index: number) => {
