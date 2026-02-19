@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
+import { supabase } from '../supabaseClient';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Legend } from 'recharts';
 
 // Types
 interface FireEntry {
+    id?: string;
     date: string;
     capitalEuro: number;
     capitalUsd: number;
@@ -52,21 +54,95 @@ const FireTracker: React.FC = () => {
         };
     });
 
-    // Persist Settings
+    // ============= Supabase Integration =============
+    const [user, setUser] = useState<any>(null);
+
     useEffect(() => {
-        localStorage.setItem('fire_settings', JSON.stringify(settings));
-    }, [settings]);
+        supabase.auth.getSession().then(({ data: { session } }) => {
+            setUser(session?.user ?? null);
+        });
+    }, []);
 
     // State for Data
-    const [entries, setEntries] = useState<FireEntry[]>(() => {
-        const saved = localStorage.getItem('fire_entries');
-        return saved ? JSON.parse(saved) : [];
-    });
+    const [entries, setEntries] = useState<FireEntry[]>([]);
 
-    // Persist Data
+    // Load Data from Supabase
     useEffect(() => {
-        localStorage.setItem('fire_entries', JSON.stringify(entries));
-    }, [entries]);
+        if (!user) return;
+
+        const loadData = async () => {
+            try {
+                // 1. Fetch Settings
+                const { data: settingsData, error: settingsError } = await supabase
+                    .from('fire_settings')
+                    .select('*')
+                    .eq('user_id', user.id)
+                    .single();
+
+                if (settingsData) {
+                    setSettings({
+                        inflationRate: settingsData.inflation_rate,
+                        returnRateBear: settingsData.return_rate_bear,
+                        returnRateBase: settingsData.return_rate_base,
+                        returnRateBull: settingsData.return_rate_bull,
+                        milestones: settingsData.milestones || []
+                    });
+                } else if (settingsError && settingsError.code !== 'PGRST116') {
+                    console.error('Error fetching settings:', settingsError);
+                }
+
+                // 2. Fetch Entries
+                const { data: entriesData, error: entriesError } = await supabase
+                    .from('fire_entries')
+                    .select('*')
+                    .order('date', { ascending: false });
+
+                if (entriesData) {
+                    const mappedEntries: FireEntry[] = entriesData.map((e: any) => ({
+                        id: e.id,
+                        date: e.date,
+                        capitalEuro: e.capital_euro,
+                        capitalUsd: e.capital_usd,
+                        contributionMkUsd: e.contribution_mk_usd,
+                        contributionKjUsd: e.contribution_kj_usd,
+                        fxRate: e.fx_rate
+                    }));
+                    setEntries(mappedEntries);
+                } else if (entriesError) {
+                    console.error('Error fetching entries:', entriesError);
+                }
+
+            } catch (error) {
+                console.error('Load Error:', error);
+            }
+        };
+
+        loadData();
+    }, [user]);
+
+
+    // Save Settings to Supabase
+    const saveSettings = async (newSettings: FireSettings) => {
+        if (!user) return;
+        try {
+            const { error } = await supabase.from('fire_settings').upsert({
+                user_id: user.id,
+                inflation_rate: newSettings.inflationRate,
+                return_rate_bear: newSettings.returnRateBear,
+                return_rate_base: newSettings.returnRateBase,
+                return_rate_bull: newSettings.returnRateBull,
+                milestones: newSettings.milestones
+            });
+            if (error) throw error;
+        } catch (error) {
+            console.error('Error saving settings:', error);
+            alert('Failed to save settings to cloud.');
+        }
+    };
+
+    // Derived effect to save settings when they change (debounced manually or just on key actions)
+    // Actually, distinct save actions are safer than useEffect for DB calls. 
+    // We will call saveSettings directly in handlers.
 
     // State for New Entry Form
     const [newEntry, setNewEntry] = useState({
@@ -75,15 +151,18 @@ const FireTracker: React.FC = () => {
         contribMk: '',
         contribKj: '',
         contribMkEur: '',
-        contribKjEur: '', // New field for KJ EUR input
-        fxRate: '1.1689' // Default from screenshot
+        contribKjEur: '',
+        fxRate: '1.1689'
     });
 
     // Editing State
-    const [editingEntry, setEditingEntry] = useState<{ index: number; data: FireEntry } | null>(null);
+    const [editingEntry, setEditingEntry] = useState<{ id: string; data: FireEntry } | null>(null);
 
-    const handleAddEntry = () => {
-        console.log('Adding entry...', newEntry);
+    const handleAddEntry = async () => {
+        if (!user) {
+            alert('Please sign in.');
+            return;
+        }
 
         // Validation with alerts
         if (!newEntry.portfolioUsd) {
@@ -112,56 +191,102 @@ const FireTracker: React.FC = () => {
         }
 
         const mkTotal = mkUsdInput + (mkEurInput * fx);
-
-        // KJ Contribution logic
         const kj = parseFloat(newEntry.contribKj) || 0;
 
-        const entry: FireEntry = {
+        const dbEntry = {
+            user_id: user.id,
             date: newEntry.date,
-            capitalUsd: pUsd,
-            capitalEuro: pUsd / fx,
-            contributionMkUsd: mkTotal,
-            contributionKjUsd: kj,
-            fxRate: fx
+            capital_usd: pUsd,
+            capital_euro: pUsd / fx,
+            contribution_mk_usd: mkTotal,
+            contribution_kj_usd: kj,
+            fx_rate: fx
         };
 
-        const updatedEntries = [entry, ...entries].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-        setEntries(updatedEntries);
-        // Reset form but keep FX
-        setNewEntry(prev => ({ ...prev, portfolioUsd: '', contribMk: '', contribKj: '', contribMkEur: '', contribKjEur: '' }));
-        alert('Entry Added!');
-    };
+        try {
+            const { data, error } = await supabase.from('fire_entries').insert(dbEntry).select();
+            if (error) throw error;
 
-    const handleDeleteEntry = (index: number) => {
-        if (window.confirm('Are you sure you want to delete this entry?')) {
-            const newEntries = [...entries];
-            newEntries.splice(index, 1);
-            setEntries(newEntries);
-            if (editingEntry) setEditingEntry(null); // Close modal if open
+            if (data) {
+                const newLocalEntry: FireEntry = {
+                    id: data[0].id,
+                    date: data[0].date,
+                    capitalEuro: data[0].capital_euro,
+                    capitalUsd: data[0].capital_usd,
+                    contributionMkUsd: data[0].contribution_mk_usd,
+                    contributionKjUsd: data[0].contribution_kj_usd,
+                    fxRate: data[0].fx_rate
+                };
+                setEntries(prev => [newLocalEntry, ...prev].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+                setNewEntry(prev => ({ ...prev, portfolioUsd: '', contribMk: '', contribKj: '', contribMkEur: '', contribKjEur: '' }));
+                alert('Entry Added to Cloud!');
+            }
+        } catch (e) {
+            console.error(e);
+            alert('Failed to save entry.');
         }
     };
 
-    const handleSaveEdit = () => {
-        if (!editingEntry) return;
-        const { index, data } = editingEntry;
-        const updatedEntries = [...entries];
-        // Recalculate capitalEuro just in case
-        const ent = { ...data, capitalEuro: data.capitalUsd / data.fxRate };
-        updatedEntries[index] = ent;
-        setEntries(updatedEntries);
-        setEditingEntry(null);
+    const handleDeleteEntry = async (id: string | undefined) => {
+        if (!id) {
+            alert('Error: Invalid ID');
+            return;
+        }
+        if (window.confirm('Are you sure you want to delete this entry?')) {
+            try {
+                const { error } = await supabase.from('fire_entries').delete().eq('id', id);
+                if (error) throw error;
+
+                setEntries(prev => prev.filter(e => e.id !== id));
+                if (editingEntry?.id === id) setEditingEntry(null);
+            } catch (e) {
+                console.error(e);
+                alert('Failed to delete.');
+            }
+        }
+    };
+
+    const handleSaveEdit = async () => {
+        if (!editingEntry || !editingEntry.id) return;
+
+        try {
+            // Recalculate derived
+            const ent = editingEntry.data;
+            const capitalEuro = ent.capitalUsd / ent.fxRate;
+
+            const { error } = await supabase.from('fire_entries').update({
+                date: ent.date,
+                capital_usd: ent.capitalUsd,
+                capital_euro: capitalEuro,
+                contribution_mk_usd: ent.contributionMkUsd,
+                contribution_kj_usd: ent.contributionKjUsd,
+                fx_rate: ent.fxRate
+            }).eq('id', editingEntry.id);
+
+            if (error) throw error;
+
+            setEntries(prev => prev.map(e => e.id === editingEntry.id ? { ...ent, capitalEuro } : e));
+            setEditingEntry(null);
+        } catch (e) {
+            console.error(e);
+            alert('Update failed.');
+        }
     };
 
     const handleAddMilestone = () => {
         const newMilestone = { name: 'New Goal', target: 0, age: 0, year: new Date().getFullYear() + 1 };
-        setSettings({ ...settings, milestones: [...settings.milestones, newMilestone] });
+        const newSettings = { ...settings, milestones: [...settings.milestones, newMilestone] };
+        setSettings(newSettings);
+        saveSettings(newSettings);
     };
 
     const handleDeleteMilestone = (index: number) => {
         if (window.confirm('Delete this milestone?')) {
             const newM = [...settings.milestones];
             newM.splice(index, 1);
-            setSettings({ ...settings, milestones: newM });
+            const newSettings = { ...settings, milestones: newM };
+            setSettings(newSettings);
+            saveSettings(newSettings);
         }
     };
 
@@ -876,8 +1001,8 @@ const FireTracker: React.FC = () => {
                                                     <td className="p-3 text-right text-emerald-400">+{growth > 0 ? '€' + growth.toLocaleString(undefined, { maximumFractionDigits: 0 }) : '€0'}</td>
                                                     <td className="p-3 text-center">
                                                         <button
-                                                            onClick={() => setEditingEntry({ index: idx, data: { ...entry } })}
-                                                            className="text-slate-500 hover:text-emerald-400 transition-colors"
+                                                            onClick={() => setEditingEntry({ id: entry.id!, data: entry })}
+                                                            className="text-xs text-amber-500 hover:text-amber-400"
                                                             title="Edit"
                                                         >
                                                             ✎
@@ -896,60 +1021,78 @@ const FireTracker: React.FC = () => {
                             </div>
                         </div>
                     )}
-                {subTab === 'settings' && (
-                    <div className="max-w-xl mx-auto space-y-6">
-                        <div className="mb-4">
-                            <h3 className="text-lg font-bold text-emerald-400 mb-1">⚙ Settings</h3>
-                            <p className="text-xs text-slate-500">Customize assumptions for projections and calculations.</p>
-                        </div>
-
-                        <div className="bg-slate-900/40 p-6 rounded-xl border border-slate-800/50 space-y-6">
-                            <div>
-                                <label className="block text-[10px] uppercase text-slate-500 font-bold mb-2">Inflation Rate (Annual %)</label>
-                                <input
-                                    type="number" step="0.1"
-                                    value={settings.inflationRate}
-                                    onChange={e => setSettings({ ...settings, inflationRate: parseFloat(e.target.value) || 0 })}
-                                    className="w-full bg-slate-800 text-slate-200 border border-slate-700 rounded p-2 text-sm font-bold focus:ring-emerald-500/50 focus:border-emerald-500"
-                                />
-                                <p className="text-[10px] text-slate-500 mt-1">Subtracted from nominal returns to get real returns.</p>
+                {
+                    subTab === 'settings' && (
+                        <div className="max-w-xl mx-auto space-y-8">
+                            {/* Rates */}
+                            <div className="bg-slate-900/40 p-6 rounded-xl border border-slate-800/50">
+                                <h3 className="text-lg font-bold text-emerald-400 mb-4">Assumptions</h3>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-[10px] uppercase text-slate-500 font-bold mb-1">Inflation Rate (%)</label>
+                                        <input
+                                            type="number"
+                                            value={settings.inflationRate}
+                                            onChange={e => {
+                                                const val = parseFloat(e.target.value) || 0;
+                                                const newSettings = { ...settings, inflationRate: val };
+                                                setSettings(newSettings);
+                                                saveSettings(newSettings);
+                                            }}
+                                            className="w-full bg-slate-800 text-slate-200 border border-slate-700 rounded p-2 text-xs"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-[10px] uppercase text-slate-500 font-bold mb-1">Base Return (%)</label>
+                                        <input
+                                            type="number"
+                                            value={settings.returnRateBase}
+                                            onChange={e => {
+                                                const val = parseFloat(e.target.value) || 0;
+                                                const newSettings = { ...settings, returnRateBase: val };
+                                                setSettings(newSettings);
+                                                saveSettings(newSettings);
+                                            }}
+                                            className="w-full bg-slate-800 text-slate-200 border border-slate-700 rounded p-2 text-xs"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-[10px] uppercase text-slate-500 font-bold mb-1">Bear Return (%)</label>
+                                        <input
+                                            type="number"
+                                            value={settings.returnRateBear}
+                                            onChange={e => {
+                                                const val = parseFloat(e.target.value) || 0;
+                                                const newSettings = { ...settings, returnRateBear: val };
+                                                setSettings(newSettings);
+                                                saveSettings(newSettings);
+                                            }}
+                                            className="w-full bg-slate-800 text-slate-200 border border-slate-700 rounded p-2 text-xs"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-[10px] uppercase text-slate-500 font-bold mb-1">Bull Return (%)</label>
+                                        <input
+                                            type="number"
+                                            value={settings.returnRateBull}
+                                            onChange={e => {
+                                                const val = parseFloat(e.target.value) || 0;
+                                                const newSettings = { ...settings, returnRateBull: val };
+                                                setSettings(newSettings);
+                                                saveSettings(newSettings);
+                                            }}
+                                            className="w-full bg-slate-800 text-slate-200 border border-slate-700 rounded p-2 text-xs"
+                                        />
+                                    </div>
+                                </div>
                             </div>
 
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                <div>
-                                    <label className="block text-[10px] uppercase text-rose-400 font-bold mb-2">Bear Rate (%)</label>
-                                    <input
-                                        type="number" step="0.1"
-                                        value={settings.returnRateBear}
-                                        onChange={e => setSettings({ ...settings, returnRateBear: parseFloat(e.target.value) || 0 })}
-                                        className="w-full bg-slate-800 text-rose-400 border border-slate-700 rounded p-2 text-sm font-bold focus:ring-rose-500/50 focus:border-rose-500"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-[10px] uppercase text-emerald-400 font-bold mb-2">Base Rate (%)</label>
-                                    <input
-                                        type="number" step="0.1"
-                                        value={settings.returnRateBase}
-                                        onChange={e => setSettings({ ...settings, returnRateBase: parseFloat(e.target.value) || 0 })}
-                                        className="w-full bg-slate-800 text-emerald-400 border border-slate-700 rounded p-2 text-sm font-bold focus:ring-emerald-500/50 focus:border-emerald-500"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-[10px] uppercase text-blue-400 font-bold mb-2">Bull Rate (%)</label>
-                                    <input
-                                        type="number" step="0.1"
-                                        value={settings.returnRateBull}
-                                        onChange={e => setSettings({ ...settings, returnRateBull: parseFloat(e.target.value) || 0 })}
-                                        className="w-full bg-slate-800 text-blue-400 border border-slate-700 rounded p-2 text-sm font-bold focus:ring-blue-500/50 focus:border-blue-500"
-                                    />
-                                </div>
-                            </div>
-
-                            <div className="pt-6 border-t border-slate-800/50">
-                                <h4 className="text-sm font-bold text-slate-300 mb-4">Goals & Milestones</h4>
+                            {/* Milestones Config */}
+                            <div className="bg-slate-900/40 p-6 rounded-xl border border-slate-800/50">
+                                <h3 className="text-lg font-bold text-emerald-400 mb-4">Milestones</h3>
                                 <div className="space-y-4">
-                                    {settings.milestones.map((m, idx) => (
-                                        <div key={idx} className="grid grid-cols-12 gap-2 items-end">
+                                    {(settings.milestones || []).map((m, idx) => (
+                                        <div key={idx} className="grid grid-cols-12 gap-2 items-center bg-slate-950/30 p-3 rounded-lg border border-slate-800">
                                             <div className="col-span-4">
                                                 <label className="block text-[9px] uppercase text-slate-500 font-bold mb-1">Name</label>
                                                 <input
@@ -959,6 +1102,7 @@ const FireTracker: React.FC = () => {
                                                         const newM = [...settings.milestones];
                                                         newM[idx].name = e.target.value;
                                                         setSettings({ ...settings, milestones: newM });
+                                                        saveSettings({ ...settings, milestones: newM });
                                                     }}
                                                     className="w-full bg-slate-800 text-slate-200 border border-slate-700 rounded p-2 text-xs"
                                                 />
@@ -972,6 +1116,7 @@ const FireTracker: React.FC = () => {
                                                         const newM = [...settings.milestones];
                                                         newM[idx].target = parseFloat(e.target.value) || 0;
                                                         setSettings({ ...settings, milestones: newM });
+                                                        saveSettings({ ...settings, milestones: newM });
                                                     }}
                                                     className="w-full bg-slate-800 text-slate-200 border border-slate-700 rounded p-2 text-xs"
                                                 />
@@ -985,6 +1130,7 @@ const FireTracker: React.FC = () => {
                                                         const newM = [...settings.milestones];
                                                         newM[idx].year = parseInt(e.target.value) || 0;
                                                         setSettings({ ...settings, milestones: newM });
+                                                        saveSettings({ ...settings, milestones: newM });
                                                     }}
                                                     className="w-full bg-slate-800 text-slate-200 border border-slate-700 rounded p-2 text-xs"
                                                 />
@@ -998,11 +1144,12 @@ const FireTracker: React.FC = () => {
                                                         const newM = [...settings.milestones];
                                                         newM[idx].age = parseInt(e.target.value) || 0;
                                                         setSettings({ ...settings, milestones: newM });
+                                                        saveSettings({ ...settings, milestones: newM });
                                                     }}
                                                     className="w-full bg-slate-800 text-slate-200 border border-slate-700 rounded p-2 text-xs"
                                                 />
                                             </div>
-                                            <div className="col-span-1 flex justify-center pb-2">
+                                            <div className="col-span-1 flex justify-center pt-4">
                                                 <button
                                                     onClick={() => handleDeleteMilestone(idx)}
                                                     className="text-slate-600 hover:text-rose-500 transition-colors"
@@ -1024,90 +1171,90 @@ const FireTracker: React.FC = () => {
                                 </div>
                             </div>
                         </div>
+                    )
+                }
+                {/* Edit Modal */}
+                {editingEntry && (
+                    <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                        <div className="bg-slate-900 border border-slate-800 rounded-xl max-w-md w-full p-6 shadow-2xl animate-fade-in">
+                            <h3 className="text-lg font-bold text-emerald-400 mb-4">Edit Entry</h3>
+
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-[10px] uppercase text-slate-500 font-bold mb-1">Date</label>
+                                    <input
+                                        type="date"
+                                        value={editingEntry.data.date}
+                                        onChange={e => setEditingEntry({ ...editingEntry, data: { ...editingEntry.data, date: e.target.value } })}
+                                        className="w-full bg-slate-800 text-slate-200 border border-slate-700 rounded p-2 text-xs"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-[10px] uppercase text-slate-500 font-bold mb-1">Portfolio (USD)</label>
+                                    <input
+                                        type="number"
+                                        value={editingEntry.data.capitalUsd}
+                                        onChange={e => setEditingEntry({ ...editingEntry, data: { ...editingEntry.data, capitalUsd: parseFloat(e.target.value) || 0 } })}
+                                        className="w-full bg-slate-800 text-slate-200 border border-slate-700 rounded p-2 text-xs"
+                                    />
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-[10px] uppercase text-slate-500 font-bold mb-1">MK (USD)</label>
+                                        <input
+                                            type="number"
+                                            value={editingEntry.data.contributionMkUsd}
+                                            onChange={e => setEditingEntry({ ...editingEntry, data: { ...editingEntry.data, contributionMkUsd: parseFloat(e.target.value) || 0 } })}
+                                            className="w-full bg-slate-800 text-slate-200 border border-slate-700 rounded p-2 text-xs"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-[10px] uppercase text-slate-500 font-bold mb-1">KJ (USD)</label>
+                                        <input
+                                            type="number"
+                                            value={editingEntry.data.contributionKjUsd}
+                                            onChange={e => setEditingEntry({ ...editingEntry, data: { ...editingEntry.data, contributionKjUsd: parseFloat(e.target.value) || 0 } })}
+                                            className="w-full bg-slate-800 text-slate-200 border border-slate-700 rounded p-2 text-xs"
+                                        />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-[10px] uppercase text-slate-500 font-bold mb-1">FX Rate</label>
+                                    <input
+                                        type="number"
+                                        value={editingEntry.data.fxRate}
+                                        onChange={e => setEditingEntry({ ...editingEntry, data: { ...editingEntry.data, fxRate: parseFloat(e.target.value) || 1 } })}
+                                        className="w-full bg-slate-800 text-slate-200 border border-slate-700 rounded p-2 text-xs"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="flex items-center justify-between mt-6 pt-4 border-t border-slate-800">
+                                <button
+                                    onClick={() => handleDeleteEntry(editingEntry.id)}
+                                    className="text-rose-400 hover:text-rose-300 text-xs font-bold px-3 py-2 rounded hover:bg-rose-500/10 transition-colors"
+                                >
+                                    🗑 Delete Entry
+                                </button>
+                                <div className="flex space-x-2">
+                                    <button
+                                        onClick={() => setEditingEntry(null)}
+                                        className="px-4 py-2 text-slate-400 hover:text-slate-200 text-xs font-bold"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        onClick={handleSaveEdit}
+                                        className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-900 font-bold rounded-lg text-xs"
+                                    >
+                                        Save Changes
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 )}
             </div>
-            {/* Edit Modal */}
-            {editingEntry && (
-                <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                    <div className="bg-slate-900 border border-slate-800 rounded-xl max-w-md w-full p-6 shadow-2xl animate-fade-in">
-                        <h3 className="text-lg font-bold text-emerald-400 mb-4">Edit Entry</h3>
-
-                        <div className="space-y-4">
-                            <div>
-                                <label className="block text-[10px] uppercase text-slate-500 font-bold mb-1">Date</label>
-                                <input
-                                    type="date"
-                                    value={editingEntry.data.date}
-                                    onChange={e => setEditingEntry({ ...editingEntry, data: { ...editingEntry.data, date: e.target.value } })}
-                                    className="w-full bg-slate-800 text-slate-200 border border-slate-700 rounded p-2 text-xs"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-[10px] uppercase text-slate-500 font-bold mb-1">Portfolio (USD)</label>
-                                <input
-                                    type="number"
-                                    value={editingEntry.data.capitalUsd}
-                                    onChange={e => setEditingEntry({ ...editingEntry, data: { ...editingEntry.data, capitalUsd: parseFloat(e.target.value) || 0 } })}
-                                    className="w-full bg-slate-800 text-slate-200 border border-slate-700 rounded p-2 text-xs"
-                                />
-                            </div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-[10px] uppercase text-slate-500 font-bold mb-1">MK (USD)</label>
-                                    <input
-                                        type="number"
-                                        value={editingEntry.data.contributionMkUsd}
-                                        onChange={e => setEditingEntry({ ...editingEntry, data: { ...editingEntry.data, contributionMkUsd: parseFloat(e.target.value) || 0 } })}
-                                        className="w-full bg-slate-800 text-slate-200 border border-slate-700 rounded p-2 text-xs"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-[10px] uppercase text-slate-500 font-bold mb-1">KJ (USD)</label>
-                                    <input
-                                        type="number"
-                                        value={editingEntry.data.contributionKjUsd}
-                                        onChange={e => setEditingEntry({ ...editingEntry, data: { ...editingEntry.data, contributionKjUsd: parseFloat(e.target.value) || 0 } })}
-                                        className="w-full bg-slate-800 text-slate-200 border border-slate-700 rounded p-2 text-xs"
-                                    />
-                                </div>
-                            </div>
-                            <div>
-                                <label className="block text-[10px] uppercase text-slate-500 font-bold mb-1">FX Rate</label>
-                                <input
-                                    type="number"
-                                    value={editingEntry.data.fxRate}
-                                    onChange={e => setEditingEntry({ ...editingEntry, data: { ...editingEntry.data, fxRate: parseFloat(e.target.value) || 1 } })}
-                                    className="w-full bg-slate-800 text-slate-200 border border-slate-700 rounded p-2 text-xs"
-                                />
-                            </div>
-                        </div>
-
-                        <div className="flex items-center justify-between mt-6 pt-4 border-t border-slate-800">
-                            <button
-                                onClick={() => handleDeleteEntry(editingEntry.index)}
-                                className="text-rose-400 hover:text-rose-300 text-xs font-bold px-3 py-2 rounded hover:bg-rose-500/10 transition-colors"
-                            >
-                                🗑 Delete Entry
-                            </button>
-                            <div className="flex space-x-2">
-                                <button
-                                    onClick={() => setEditingEntry(null)}
-                                    className="px-4 py-2 text-slate-400 hover:text-slate-200 text-xs font-bold"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    onClick={handleSaveEdit}
-                                    className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-900 font-bold rounded-lg text-xs"
-                                >
-                                    Save Changes
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
         </div>
     );
 };

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
+import { migrateLocalDataToCloud } from './utils/cloudMigration';
 import Auth from './components/Auth';
 import EmpireDashboard from './components/EmpireDashboard';
 import AllWeatherCalculator from './components/AllWeatherCalculator';
@@ -29,6 +30,9 @@ function App() {
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       setLoading(false);
+      if (session?.user) {
+        migrateLocalDataToCloud(session.user.id);
+      }
     });
 
     return () => subscription.unsubscribe();

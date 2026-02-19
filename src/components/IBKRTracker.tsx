@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { supabase } from '../supabaseClient';
 
 // Types
 interface Trade {
@@ -12,6 +13,7 @@ interface Trade {
     totalValue: number;
     importedAt: string;
     account?: string; // Track which account this trade belongs to
+    isExecution?: boolean; // TWS Execution flag
 }
 
 interface Position {
@@ -26,37 +28,51 @@ interface Position {
     account?: string; // Track which account this position belongs to
 }
 
-// TWS Bridge Types
 interface TWSAccountSummary {
-    netLiquidation: number;
-    totalCashValue: number;
+    accountReady: boolean;
+    accountType: string;
+    accruedCash: number;
     availableFunds: number;
     buyingPower: number;
+    cushion: number;
+    dayTradesRemaining: number;
+    equityWithLoanValue: number;
+    excessLiquidity: number;
     grossPositionValue: number;
+    initMarginReq: number;
+    leverage: number;
+    maintMarginReq: number;
+    netLiquidation: number;
+    totalCashValue: number;
     unrealizedPnL: number;
-    realizedPnL: number;
     currency: string;
 }
 
 interface TWSPosition {
     account: string;
-    symbol: string;
-    secType: string;
-    exchange: string;
-    currency: string;
+    symbol: string; // Added top-level symbol to match usage
+    contract: {
+        conid: number;
+        symbol: string;
+        secType: string;
+        exchange: string;
+        currency: string;
+        localSymbol?: string;
+        tradingClass?: string;
+    };
     position: number;
     avgCost: number;
+    marketPrice: number;
+    marketValue: number;
+    unrealizedPNL: number;
+    realizedPNL: number;
 }
 
 interface TWSStatus {
     connected: boolean;
-    twsPort: number;
-    accounts: string[];
-    positionCount: number;
-    lastError: { message: string; code: number } | null;
+    serverTime?: string;
 }
 
-// RealTest Types
 interface RealTestTrade {
     tradeId: string;
     strategy: string;
@@ -74,32 +90,44 @@ interface RealTestTrade {
     profit: number;
     size: number;
     dividends: number;
-    isOpen: boolean; // true if Reason = "end of test"
+    isOpen: boolean;
+}
+
+interface PositionComparison {
+    symbol: string;
+    rtQty: number;
+    rtCost: number;
+    twsQty: number;
+    twsCost: number;
+    qtyDelta: number;
+    valueDelta: number;
 }
 
 interface RealTestSyncAnalysis {
-    rtBalance: number;       // RealTest theoretical balance
-    twsBalance: number;      // TWS actual balance
-    rtCash: number;          // RealTest theoretical cash
-    twsCash: number;         // TWS actual cash
-    drift: number;           // TWS - RT difference
-    positionComparison: {
-        symbol: string;
-        rtQty: number;
-        rtCost: number;
-        twsQty: number;
-        twsCost: number;
-        qtyDelta: number;
-        valueDelta: number;
-    }[];
-    recommendedAdjustment: number; // Positive = Deposit, Negative = Withdrawal
-    adjustmentType: 'DEPOSIT' | 'WITHDRAWAL' | 'NONE';
+    rtBalance: number;
+    twsBalance: number;
+    rtCash: number;
+    twsCash: number;
+    drift: number;
+    positionComparison: PositionComparison[];
+    recommendedAdjustment: number;
+    adjustmentType: string;
 }
 
-const STORAGE_KEY = 'ibkr_tracker_v1';
+// ... existing interfaces ...
+
 const TWS_BRIDGE_URL = 'http://localhost:3001';
 
 export default function IBKRTracker() {
+    // Supabase User
+    const [user, setUser] = useState<any>(null);
+
+    useEffect(() => {
+        supabase.auth.getSession().then(({ data: { session } }) => {
+            setUser(session?.user ?? null);
+        });
+    }, []);
+
     const [trades, setTrades] = useState<Trade[]>([]);
     const [positions, setPositions] = useState<Position[]>([]);
     const [cashBalance, setCashBalance] = useState<number>(0);
@@ -137,47 +165,140 @@ export default function IBKRTracker() {
     const [realTestSyncAnalysis, setRealTestSyncAnalysis] = useState<RealTestSyncAnalysis | null>(null);
     const [showRealTestSync, setShowRealTestSync] = useState(false);
 
-    // Load data from localStorage with migration for old format
+    // Load data from Supabase
     useEffect(() => {
-        try {
-            const saved = localStorage.getItem(STORAGE_KEY);
-            if (saved) {
-                const data = JSON.parse(saved);
-                setTrades(data.trades || []);
+        if (!user) return;
 
-                // Migrate old positions with 'system' (string) to 'systems' (array)
-                const migratedPositions = (data.positions || []).map((p: any) => {
-                    if (p.systems) {
-                        return p; // Already new format
-                    } else if (p.system) {
-                        // Old format - convert to new
-                        return { ...p, systems: [p.system] };
-                    }
-                    return p;
-                });
-                setPositions(migratedPositions);
-                setCashBalance(data.cashBalance || 0);
+        const loadData = async () => {
+            try {
+                // 1. Settings (Cash Balance)
+                const { data: settingsData } = await supabase
+                    .from('ibkr_settings')
+                    .select('cash_balance')
+                    .eq('user_id', user.id)
+                    .single();
+                if (settingsData) setCashBalance(settingsData.cash_balance);
+
+                // 2. Trades
+                const { data: tradesData } = await supabase
+                    .from('ibkr_trades')
+                    .select('*');
+
+                if (tradesData) {
+                    const mappedTrades: Trade[] = tradesData.map((t: any) => ({
+                        id: t.id,
+                        date: t.date,
+                        system: t.system as 'NDX' | 'RUI' | 'PF', // Cast carefully
+                        symbol: t.symbol,
+                        action: t.action,
+                        quantity: t.quantity,
+                        price: t.price,
+                        totalValue: t.total_value,
+                        importedAt: t.imported_at,
+                        account: t.account,
+                        isExecution: false // DB trades are saved, so they are effectively "manual" records unless we flag them? 
+                        // Actually, if we save TWS executions to DB, they become persistent. 
+                        // For now, let's assume DB trades are what we manage.
+                    }));
+                    setTrades(mappedTrades);
+                }
+
+                // 3. Positions
+                const { data: posData } = await supabase
+                    .from('ibkr_positions')
+                    .select('*');
+
+                if (posData) {
+                    const mappedPositions: Position[] = posData.map((p: any) => ({
+                        symbol: p.symbol,
+                        systems: p.systems,
+                        quantity: p.quantity,
+                        avgCost: p.avg_cost,
+                        currentPrice: p.current_price,
+                        marketValue: p.market_value,
+                        pnl: p.pnl,
+                        pnlPercent: p.pnl_percent,
+                        account: p.account
+                    }));
+                    setPositions(mappedPositions);
+                }
+
+            } catch (error) {
+                console.error('Error loading IBKR data:', error);
             }
-        } catch (e) {
-            console.error('Failed to load IBKR data:', e);
-            // Clear corrupted data
-            localStorage.removeItem(STORAGE_KEY);
-        }
-    }, []);
+        };
 
-    // Save to localStorage
-    const saveData = useCallback((newTrades: Trade[], newPositions: Position[], newCash: number) => {
-        try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify({
-                trades: newTrades,
-                positions: newPositions,
-                cashBalance: newCash,
-                lastUpdated: new Date().toISOString()
-            }));
-        } catch (e) {
-            console.error('Failed to save IBKR data:', e);
+        loadData();
+    }, [user]);
+
+    // DB Helper Functions
+    const saveCashBalance = async (newBalance: number) => {
+        if (!user) return;
+        setCashBalance(newBalance);
+        await supabase.from('ibkr_settings').upsert({
+            user_id: user.id,
+            cash_balance: newBalance
+        });
+    };
+
+    const upsertTrades = async (newTrades: Trade[]) => {
+        if (!user) return;
+        const dbTrades = newTrades.map(t => ({
+            user_id: user.id,
+            id: t.id,
+            date: t.date,
+            symbol: t.symbol,
+            action: t.action,
+            quantity: t.quantity,
+            price: t.price,
+            total_value: t.totalValue,
+            system: t.system,
+            imported_at: t.importedAt,
+            account: t.account
+        }));
+
+        const { error } = await supabase.from('ibkr_trades').upsert(dbTrades);
+        if (error) console.error('Error saving trades:', error);
+    };
+
+    const deleteTradeFromDb = async (tradeId: string) => {
+        if (!user) return;
+        const { error } = await supabase.from('ibkr_trades').delete().eq('id', tradeId);
+        if (error) console.error('Error deleting trade:', error);
+    };
+
+    const upsertPositions = async (newPositions: Position[]) => {
+        if (!user) return;
+        const dbPositions = newPositions.map(p => ({
+            user_id: user.id,
+            symbol: p.symbol,
+            account: p.account || 'UNKNOWN', // Composite key requires account. Handle empty/null.
+            systems: p.systems,
+            quantity: p.quantity,
+            avg_cost: p.avgCost,
+            current_price: p.currentPrice,
+            market_value: p.marketValue,
+            pnl: p.pnl,
+            pnl_percent: p.pnlPercent
+        }));
+
+        const { error } = await supabase.from('ibkr_positions').upsert(dbPositions);
+        if (error) console.error('Error saving positions:', error);
+    };
+
+    const deletePositionFromDb = async (symbol: string, account?: string) => {
+        if (!user) return;
+        let query = supabase.from('ibkr_positions').delete().eq('symbol', symbol);
+        if (account) {
+            query = query.eq('account', account);
+        } else {
+            // If just symbol, maybe delete all accounts? Or default?
+            // Existing logic was 'delete position by symbol'.
+            // But now we have accounts.
         }
-    }, []);
+        const { error } = await query;
+        if (error) console.error('Error deleting position:', error);
+    };
 
     // Fetch data from TWS Bridge
     const fetchTwsData = useCallback(async () => {
@@ -411,9 +532,10 @@ export default function IBKRTracker() {
         });
 
         setPositions(updatedPositions);
-        saveData(trades, updatedPositions, cashBalance);
+        setPositions(updatedPositions);
+        upsertPositions(updatedPositions); // Save new prices to DB
         setIsLoading(false);
-    }, [positions, twsPositions, trades, cashBalance, saveData, twsConnected]);
+    }, [positions, twsPositions, trades, cashBalance, twsConnected]);
 
     // Parse IBKR Basket Trader CSV file
     // Format: Action,Quantity,Symbol,SecType,Exchange,Currency,TimeInForce,GoodTilDate,GoodAfterTime,OrderType,LmtPrice,AuxPrice,OcaGroup,OrderId,ParentOrderId,BasketTag,Account
@@ -955,29 +1077,32 @@ export default function IBKRTracker() {
                     quantity: Math.abs(p.delta),
                     price: p.price,
                     totalValue: Math.abs(p.delta) * p.price,
-                    importedAt: new Date().toISOString()
+                    importedAt: new Date().toISOString(),
+                    account: selectedAccount !== 'ALL' ? selectedAccount : undefined
                 }));
 
             const updatedTrades = [...trades, ...newTrades];
             setTrades(updatedTrades);
+            upsertTrades(newTrades); // Save only new ones to DB (or updatedTrades if simpler, but new is better)
 
             // Recalculate positions
             const newPositions = calculatePositions(updatedTrades);
             setPositions(newPositions);
+            upsertPositions(newPositions);
 
-            saveData(updatedTrades, newPositions, cashBalance);
             setRebalancePreview(null);
         } else if (csvPreview) {
             const newTrades = [...trades, ...csvPreview];
             setTrades(newTrades);
+            upsertTrades(csvPreview);
 
             // Recalculate positions
             const newPositions = calculatePositions(newTrades);
             setPositions(newPositions);
+            upsertPositions(newPositions);
 
             // Update cash balance (optional: logic to deduce cost)
             // For now, just save
-            saveData(newTrades, newPositions, cashBalance);
             setCsvPreview(null);
         }
     };
@@ -990,9 +1115,12 @@ export default function IBKRTracker() {
     const deleteTrade = (tradeId: string) => {
         const newTrades = trades.filter(t => t.id !== tradeId);
         setTrades(newTrades);
+
+        deleteTradeFromDb(tradeId);
+
         const newPositions = calculatePositions(newTrades);
         setPositions(newPositions);
-        saveData(newTrades, newPositions, cashBalance);
+        upsertPositions(newPositions);
     };
 
     // Update a trade (quantity, price)
@@ -1001,6 +1129,7 @@ export default function IBKRTracker() {
             if (t.id === tradeId) {
                 const updated = { ...t, ...updates };
                 updated.totalValue = updated.quantity * updated.price;
+                upsertTrades([updated]); // Save specific update
                 return updated;
             }
             return t;
@@ -1008,39 +1137,52 @@ export default function IBKRTracker() {
         setTrades(newTrades);
         const newPositions = calculatePositions(newTrades);
         setPositions(newPositions);
-        saveData(newTrades, newPositions, cashBalance);
+        upsertPositions(newPositions);
         setEditingTradeId(null);
     };
 
     // Delete a position (removes all trades for that symbol)
     const deletePosition = (symbol: string) => {
+        // 1. Identify trades to delete
+        const tradesToDelete = trades.filter(t => t.symbol === symbol);
+
+        // 2. Delete from DB
+        tradesToDelete.forEach(t => deleteTradeFromDb(t.id));
+        deletePositionFromDb(symbol);
+
+        // 3. Update State
         const newTrades = trades.filter(t => t.symbol !== symbol);
         setTrades(newTrades);
         const newPositions = calculatePositions(newTrades);
         setPositions(newPositions);
-        saveData(newTrades, newPositions, cashBalance);
+        // upsertPositions(newPositions); // usually not needed as we just deleted one, but calculatePositions is safe
     };
 
     // Update a position (updates avgCost which affects display)
     const updatePosition = (symbol: string, updates: Partial<Position>) => {
         const newPositions = positions.map(p => {
             if (p.symbol === symbol) {
-                return { ...p, ...updates };
+                const updated = { ...p, ...updates };
+                upsertPositions([updated]);
+                return updated;
             }
             return p;
         });
         setPositions(newPositions);
-        saveData(trades, newPositions, cashBalance);
         setEditingPositionSymbol(null);
     };
 
     // Clear all data
-    const clearAllData = () => {
+    const clearAllData = async () => {
+        if (!user) return;
         if (confirm('Are you sure you want to delete ALL trades and positions?')) {
             setTrades([]);
             setPositions([]);
             setCashBalance(0);
-            localStorage.removeItem(STORAGE_KEY);
+
+            await supabase.from('ibkr_trades').delete().eq('user_id', user.id);
+            await supabase.from('ibkr_positions').delete().eq('user_id', user.id);
+            await supabase.from('ibkr_settings').delete().eq('user_id', user.id);
         }
     };
 
@@ -1337,8 +1479,7 @@ export default function IBKRTracker() {
                             value={cashBalance}
                             onChange={(e) => {
                                 const val = parseFloat(e.target.value) || 0;
-                                setCashBalance(val);
-                                saveData(trades, positions, val);
+                                saveCashBalance(val);
                             }}
                             className="bg-slate-700 text-slate-100 px-3 py-2 rounded-lg w-48 text-right"
                         />

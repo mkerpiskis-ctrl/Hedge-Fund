@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { supabase } from '../supabaseClient';
 
 interface Asset {
     id: string;
@@ -25,37 +26,124 @@ interface ResultRow {
     actionType: 'BUY' | 'SELL' | 'HOLD' | '-';
 }
 
+const DEFAULT_ASSETS: Asset[] = [
+    { id: 'nasdaq', name: 'NASDAQ 100 | CNDX.L', ticker: 'CNDX.L', targetWeight: 30, price: '', averagePrice: '', units: '', currency: '' },
+    { id: 'world_ex_usa', name: 'All World - Ex USA | WEXU.DE', ticker: 'WEXU.DE', targetWeight: 20, price: '', averagePrice: '', units: '', currency: '' },
+    { id: 'gold', name: 'Gold | IGLN.L', ticker: 'IGLN.L', targetWeight: 20, price: '', averagePrice: '', units: '', currency: '' },
+    { id: 'treasuries', name: 'Treasuries | DTLA.L', ticker: 'DTLA.L', targetWeight: 10, price: '', averagePrice: '', units: '', currency: '' },
+    { id: 'commodities', name: 'Commodities | ETL2.DE', ticker: 'ETL2.DE', targetWeight: 10, price: '', averagePrice: '', units: '', currency: '' },
+    { id: 'bitcoin', name: 'Bitcoin | IBIT', ticker: 'BTC', targetWeight: 10, price: '', averagePrice: '', units: '', currency: '' },
+];
+
 const AllWeatherCalculator: React.FC = () => {
-    const [cash, setCash] = useState<number | string>(() => {
-        const saved = localStorage.getItem('aw_cash');
-        return saved ? parseFloat(saved) : '';
-    });
+    // Supabase User
+    const [user, setUser] = useState<any>(null);
 
+    useEffect(() => {
+        supabase.auth.getSession().then(({ data: { session } }) => {
+            setUser(session?.user ?? null);
+        });
+    }, []);
+
+    const [cash, setCash] = useState<number | string>('');
     const [debugLogs, setDebugLogs] = useState<string[]>([]);
+    const [assets, setAssets] = useState<Asset[]>(DEFAULT_ASSETS);
 
-    const [assets, setAssets] = useState<Asset[]>(() => {
-        const saved = localStorage.getItem('aw_assets_v3');
-        if (saved) {
-            return JSON.parse(saved);
+    // DB Helpers
+    const saveSettings = async (val: number | string) => {
+        if (!user) return;
+        const numVal = val === '' ? 0 : parseFloat(val.toString());
+        await supabase.from('aw_settings').upsert({
+            user_id: user.id,
+            cash_balance: numVal
+        });
+    };
+
+    // DB Load
+    useEffect(() => {
+        if (!user) return;
+
+        const loadData = async () => {
+            // 1. Cash
+            const { data: settings } = await supabase.from('aw_settings').select('cash_balance').eq('user_id', user.id).single();
+            if (settings) setCash(settings.cash_balance);
+
+            // 2. Assets
+            const { data: dbAssets } = await supabase.from('aw_assets').select('*').eq('user_id', user.id);
+
+            if (dbAssets && dbAssets.length > 0) {
+                // Map DB to State
+                const mapped: Asset[] = dbAssets.map((row: any) => ({
+                    id: row.asset_id, // Use the string ID 'nasdaq'
+                    name: row.name,
+                    ticker: row.ticker,
+                    targetWeight: row.target_weight,
+                    price: row.input_price === 0 ? '' : row.input_price, // Handle 0 as '' for inputs? 
+                    // Actually safeParse handles '' as 0. 
+                    // If we want friendly UI, '' is better for empty.
+                    averagePrice: row.average_price === 0 ? '' : row.average_price,
+                    units: row.input_units === 0 ? '' : row.input_units,
+                    currency: row.currency,
+                    isLocked: row.is_locked,
+                    // Store the UUID somewhere?
+                    // I will attach it as `_pk` hidden property if needed, but actually
+                    // I can just UPDATE where user_id=X and asset_id=Y.
+                }));
+
+                // Sort to match default order (optional but nice)
+                const order = ['nasdaq', 'world_ex_usa', 'gold', 'treasuries', 'commodities', 'bitcoin'];
+                mapped.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+
+                setAssets(mapped);
+            } else {
+                // First time: Insert Defaults
+                const initialAssets = DEFAULT_ASSETS.map(a => ({
+                    user_id: user.id,
+                    asset_id: a.id,
+                    name: a.name,
+                    ticker: a.ticker,
+                    target_weight: a.targetWeight,
+                    input_price: 0,
+                    input_units: 0,
+                    average_price: 0,
+                    currency: '',
+                    is_locked: false
+                }));
+
+                await supabase.from('aw_assets').insert(initialAssets);
+                // State is already DEFAULT_ASSETS
+            }
+        };
+        loadData();
+    }, [user]);
+
+    // We need to implement saveAsset correctly knowing there's no unique constraint on (user_id, asset_id).
+    // I can do: `update aw_assets set ... where user_id = ... and asset_id = ...`
+    // Supabase `.update(payload).eq('user_id', user.id).eq('asset_id', asset.id)`
+
+    // Redefine saveAsset
+    const saveAssetToDb = async (asset: Asset) => {
+        if (!user) return;
+        const payload = {
+            target_weight: asset.targetWeight === '' ? 0 : asset.targetWeight,
+            input_price: asset.price === '' ? 0 : asset.price,
+            input_units: asset.units === '' ? 0 : asset.units,
+            average_price: asset.averagePrice === '' ? 0 : asset.averagePrice,
+            currency: asset.currency,
+            is_locked: asset.isLocked
+        };
+
+        await supabase.from('aw_assets').update(payload).eq('user_id', user.id).eq('asset_id', asset.id);
+    };
+
+    const saveAllAssets = async (newAssets: Asset[]) => {
+        if (!user) return;
+        // Batch update is hard with different values. Sequential is fine for 6 items.
+        for (const asset of newAssets) {
+            await saveAssetToDb(asset);
         }
-        return [
-            { id: 'nasdaq', name: 'NASDAQ 100 | CNDX.L', ticker: 'CNDX.L', targetWeight: 30, price: '', averagePrice: '', units: '', currency: '' },
-            { id: 'world_ex_usa', name: 'All World - Ex USA | WEXU.DE', ticker: 'WEXU.DE', targetWeight: 20, price: '', averagePrice: '', units: '', currency: '' },
-            { id: 'gold', name: 'Gold | IGLN.L', ticker: 'IGLN.L', targetWeight: 20, price: '', averagePrice: '', units: '', currency: '' },
-            { id: 'treasuries', name: 'Treasuries | DTLA.L', ticker: 'DTLA.L', targetWeight: 10, price: '', averagePrice: '', units: '', currency: '' },
-            { id: 'commodities', name: 'Commodities | ETL2.DE', ticker: 'ETL2.DE', targetWeight: 10, price: '', averagePrice: '', units: '', currency: '' },
-            { id: 'bitcoin', name: 'Bitcoin | IBIT', ticker: 'BTC', targetWeight: 10, price: '', averagePrice: '', units: '', currency: '' },
-        ];
-    });
+    };
 
-    // Save to localStorage
-    useEffect(() => {
-        localStorage.setItem('aw_cash', cash.toString());
-    }, [cash]);
-
-    useEffect(() => {
-        localStorage.setItem('aw_assets_v3', JSON.stringify(assets));
-    }, [assets]);
 
     const [results, setResults] = useState<ResultRow[]>([]);
     const [totalValue, setTotalValue] = useState<number>(0);
@@ -250,6 +338,7 @@ const AllWeatherCalculator: React.FC = () => {
         }
 
         setAssets(newAssets);
+        saveAllAssets(newAssets); // Save new prices to DB
         setIsRefreshing(false);
         setDebugLogs(logs);
     };
@@ -378,6 +467,7 @@ const AllWeatherCalculator: React.FC = () => {
                                                 placeholder="0"
                                                 value={asset.targetWeight}
                                                 onChange={(e) => handleInputChange(asset.id, 'targetWeight', e.target.value)}
+                                                onBlur={() => saveAssetToDb(asset)}
                                                 className={`w-10 text-center py-0.5 rounded bg-slate-800/50 border focus:outline-none font-bold text-xs transition-all
                                                     ${safeParse(asset.targetWeight) === 0 ? 'text-rose-400 border-rose-900/30 focus:border-rose-500' : 'text-slate-200 border-slate-700 focus:border-amber-500'}
                                                 `}
@@ -406,6 +496,7 @@ const AllWeatherCalculator: React.FC = () => {
                                             type="number"
                                             value={cash}
                                             onChange={(e) => setCash(e.target.value)}
+                                            onBlur={() => saveSettings(cash)}
                                             className="glass-input w-full pl-4 py-0.5 text-xs font-medium text-white bg-slate-900/80 focus:ring-amber-500/30 text-right border-slate-700"
                                             placeholder="0.00"
                                         />
@@ -421,8 +512,14 @@ const AllWeatherCalculator: React.FC = () => {
                                 </button>
                                 <button
                                     onClick={() => {
-                                        localStorage.removeItem('aw_assets_v3');
-                                        window.location.reload();
+                                        // Reset logic? Now it's in DB. 
+                                        // Maybe just clear local cache?
+                                        if (confirm('Clear local price cache?')) {
+                                            Object.keys(localStorage).forEach(key => {
+                                                if (key.startsWith(CACHE_PREFIX)) localStorage.removeItem(key);
+                                            });
+                                            window.location.reload();
+                                        }
                                     }}
                                     className="text-[9px] text-slate-600 hover:text-rose-400 font-mono transition-colors"
                                     title="Force Reset Cached Data"
@@ -459,6 +556,7 @@ const AllWeatherCalculator: React.FC = () => {
                                                     placeholder="0.00"
                                                     value={asset.price}
                                                     onChange={(e) => handleInputChange(asset.id, 'price', e.target.value)}
+                                                    onBlur={() => saveAssetToDb(asset)}
                                                     className="glass-input w-20 text-right text-xs py-0.5"
                                                     tabIndex={idx * 3 + 2}
                                                 />
@@ -470,6 +568,7 @@ const AllWeatherCalculator: React.FC = () => {
                                                 placeholder="0.00"
                                                 value={asset.averagePrice}
                                                 onChange={(e) => handleInputChange(asset.id, 'averagePrice', e.target.value)}
+                                                onBlur={() => saveAssetToDb(asset)}
                                                 className="glass-input w-20 text-right text-xs py-0.5"
                                                 tabIndex={idx * 3 + 3}
                                             />
@@ -480,6 +579,7 @@ const AllWeatherCalculator: React.FC = () => {
                                                 placeholder="0.00"
                                                 value={asset.units}
                                                 onChange={(e) => handleInputChange(asset.id, 'units', e.target.value)}
+                                                onBlur={() => saveAssetToDb(asset)}
                                                 className="glass-input w-20 text-right text-xs py-0.5"
                                                 tabIndex={idx * 3 + 4}
                                             />
