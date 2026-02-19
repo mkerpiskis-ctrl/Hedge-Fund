@@ -5,30 +5,44 @@ import { supabase } from '../supabaseClient';
 export default function Auth() {
     const [loading, setLoading] = useState(false);
     const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [isSignUp, setIsSignUp] = useState(false);
     const [message, setMessage] = useState('');
 
-    const handleLogin = async (e: React.FormEvent) => {
+    const handleAuth = async (e: React.FormEvent) => {
         e.preventDefault();
         setLoading(true);
         setMessage('');
 
-        const { error } = await supabase.auth.signInWithOtp({
-            email,
-            options: {
-                emailRedirectTo: window.location.origin,
-            },
-        });
+        let error;
+
+        if (isSignUp) {
+            const { error: signUpError } = await supabase.auth.signUp({
+                email,
+                password,
+            });
+            error = signUpError;
+            if (!error) {
+                setMessage('Registration successful! Please check your email to confirm your account.');
+            }
+        } else {
+            const { error: signInError } = await supabase.auth.signInWithPassword({
+                email,
+                password,
+            });
+            error = signInError;
+        }
 
         if (error) {
             let msg = error.message;
             if (msg === 'Failed to fetch') {
-                msg = 'Connection failed. Please check your Vercel Environment Variables (URL & Key) and ensure you have redeployed.';
+                msg = 'Connection failed. Please check your internet or Supabase configuration.';
+            } else if (msg === 'Invalid login credentials') {
+                msg = 'Invalid email or password.';
             }
             setMessage(msg);
-            alert(msg);
-        } else {
-            setMessage('Check your email for the login link!');
         }
+
         setLoading(false);
     };
 
@@ -42,7 +56,7 @@ export default function Auth() {
                     <p className="text-sm text-slate-400 font-medium">Secure Access Portal</p>
                 </div>
 
-                <form onSubmit={handleLogin} className="space-y-6">
+                <form onSubmit={handleAuth} className="space-y-6">
                     <div>
                         <label className="block text-xs uppercase font-bold text-slate-500 mb-2">Email Address</label>
                         <input
@@ -55,17 +69,40 @@ export default function Auth() {
                         />
                     </div>
                     <div>
+                        <label className="block text-xs uppercase font-bold text-slate-500 mb-2">Password</label>
+                        <input
+                            className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-4 py-3 text-slate-200 focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 outline-none transition-all placeholder:text-slate-600"
+                            type="password"
+                            placeholder="••••••••"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            required
+                        />
+                    </div>
+                    <div>
                         <button
                             className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-900 font-bold py-3 rounded-lg transition-all transform active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_20px_rgba(16,185,129,0.3)] hover:shadow-[0_0_30px_rgba(16,185,129,0.5)]"
                             disabled={loading}
                         >
-                            {loading ? 'Sending Magic Link...' : 'Send Magic Link'}
+                            {loading ? (isSignUp ? 'Creating Account...' : 'Signing In...') : (isSignUp ? 'Create Account' : 'Sign In')}
                         </button>
                     </div>
                 </form>
 
+                <div className="mt-6 text-center">
+                    <button
+                        onClick={() => {
+                            setIsSignUp(!isSignUp);
+                            setMessage('');
+                        }}
+                        className="text-xs text-slate-400 hover:text-emerald-400 transition-colors"
+                    >
+                        {isSignUp ? 'Already have an account? Sign In' : 'Need an account? Create one'}
+                    </button>
+                </div>
+
                 {message && (
-                    <div className={`mt-6 p-4 rounded-lg text-sm font-bold text-center border ${message.includes('Check') ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-rose-500/10 border-rose-500/20 text-rose-400'}`}>
+                    <div className={`mt-6 p-4 rounded-lg text-sm font-bold text-center border ${message.includes('successful') ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-rose-500/10 border-rose-500/20 text-rose-400'}`}>
                         {message}
                     </div>
                 )}
