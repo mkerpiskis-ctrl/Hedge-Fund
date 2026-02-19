@@ -363,6 +363,71 @@ const AllWeatherCalculator: React.FC = () => {
         setDebugLogs(logs);
     };
 
+    const [showImportModal, setShowImportModal] = useState(false);
+    const [importHtml, setImportHtml] = useState('');
+
+    const handleEtoroImport = () => {
+        if (!importHtml) return;
+
+        try {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(importHtml, 'text/html');
+            const rows = doc.querySelectorAll('.et-table-row');
+            const newAssets = [...assets];
+            let foundCount = 0;
+
+            rows.forEach(row => {
+                const tickerEl = row.querySelector('[automation-id="portfolio-overview-table-body-cell-market-name"]');
+                const priceEl = row.querySelector('[automation-id="price-price-cell-investing-mode"]'); // or last-price
+                const unitsEl = row.querySelector('[automation-id="portfolio-overview-table-body-cell-units-value"]');
+
+                if (tickerEl && unitsEl) {
+                    const ticker = tickerEl.textContent?.trim() || '';
+                    // Price might be inside a span or direct text
+                    const priceText = priceEl?.textContent?.trim().replace(/,/g, '') || '0';
+                    const unitsText = unitsEl.textContent?.trim().replace(/,/g, '') || '0';
+
+                    const price = parseFloat(priceText);
+                    const units = parseFloat(unitsText);
+
+                    // Map eToro Ticker to Internal ID
+                    let assetId = '';
+                    if (ticker.includes('CNDX')) assetId = 'nasdaq';
+                    else if (ticker.includes('IGLN')) assetId = 'gold';
+                    else if (ticker.includes('WEXU')) assetId = 'world_ex_usa';
+                    else if (ticker.includes('ETL2')) assetId = 'commodities';
+                    else if (ticker.includes('DTLA')) assetId = 'treasuries';
+                    else if (ticker.includes('BTC')) assetId = 'bitcoin';
+
+                    if (assetId) {
+                        const idx = newAssets.findIndex(a => a.id === assetId);
+                        if (idx !== -1) {
+                            newAssets[idx].price = price;
+                            newAssets[idx].units = units;
+                            // Assume import is fresh and correct currency/value
+                            // We don't change currency here, just values.
+                            // If eToro shows it, it's the effective price for the user.
+                            foundCount++;
+                        }
+                    }
+                }
+            });
+
+            if (foundCount > 0) {
+                setAssets(newAssets);
+                saveAllAssets(newAssets);
+                setShowImportModal(false);
+                setImportHtml('');
+                alert(`Successfully imported ${foundCount} assets!`);
+            } else {
+                alert('No matching assets found in HTML. Check the snippet.');
+            }
+        } catch (e) {
+            console.error(e);
+            alert('Error parsing HTML.');
+        }
+    };
+
     const safeParse = (val: number | string): number => {
         if (val === '' || val === undefined || val === null) return 0;
         const parsed = parseFloat(val.toString());
@@ -546,8 +611,46 @@ const AllWeatherCalculator: React.FC = () => {
                                 >
                                     v1.3 (RESET)
                                 </button>
+                                <button
+                                    onClick={() => setShowImportModal(true)}
+                                    className="text-[9px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded transition-colors border border-slate-700"
+                                >
+                                    IMPORT (eToro)
+                                </button>
                             </div>
                         </div>
+
+                        {/* IMPORT MODAL */}
+                        {showImportModal && (
+                            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+                                <div className="bg-slate-900 border border-slate-700 p-6 rounded-xl w-full max-w-lg shadow-2xl">
+                                    <h3 className="text-lg font-bold text-slate-100 mb-2">Import eToro Portfolio</h3>
+                                    <p className="text-xs text-slate-500 mb-4">
+                                        Go to your eToro Portfolio &rarr; List View. Inspect Element on the table body, copy the HTML (OuterHTML), and paste it below.
+                                    </p>
+                                    <textarea
+                                        value={importHtml}
+                                        onChange={(e) => setImportHtml(e.target.value)}
+                                        className="w-full h-48 bg-slate-800 text-slate-300 text-xs font-mono p-3 rounded border border-slate-700 focus:border-emerald-500 focus:outline-none mb-4"
+                                        placeholder="Paste <div class='et-table-body'>...</div> here..."
+                                    />
+                                    <div className="flex justify-end space-x-3">
+                                        <button
+                                            onClick={() => setShowImportModal(false)}
+                                            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded"
+                                        >
+                                            Cancel
+                                        </button>
+                                        <button
+                                            onClick={handleEtoroImport}
+                                            className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-900 text-xs font-bold rounded"
+                                        >
+                                            Parse & Import
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                         <table className="w-full text-left border-collapse">
                             <thead className="bg-slate-900/50 text-[10px] uppercase text-slate-500 font-semibold">
                                 <tr>
