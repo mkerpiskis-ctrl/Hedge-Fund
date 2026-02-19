@@ -32,26 +32,16 @@ const FireTracker: React.FC = () => {
     const [subTab, setSubTab] = useState<'overview' | 'update' | 'scenarios' | 'analytics' | 'history' | 'settings'>('overview');
 
     // State for Settings
-    const [settings, setSettings] = useState<FireSettings>(() => {
-        const saved = localStorage.getItem('fire_settings');
-        const parsed = saved ? JSON.parse(saved) : {};
-        const defaults = {
-            inflationRate: 2.5,
-            returnRateBear: 5.0,
-            returnRateBase: 7.0,
-            returnRateBull: 9.0,
-            milestones: [
-                { name: 'Grinding', target: 273508, age: 40, year: 2030 },
-                { name: 'YOUR RETIREMENT (MK)', target: 661837, age: 46, year: 2036 },
-                { name: 'SPOUSE RETIREMENT (KJ)', target: 850000, age: 58, year: 2048 }
-            ]
-        };
-        // Merge saved settings with defaults to handle new fields (like milestones)
-        return {
-            ...defaults,
-            ...parsed,
-            milestones: parsed.milestones || defaults.milestones
-        };
+    const [settings, setSettings] = useState<FireSettings>({
+        inflationRate: 2.5,
+        returnRateBear: 5.0,
+        returnRateBase: 7.0,
+        returnRateBull: 9.0,
+        milestones: [
+            { name: 'Grinding', target: 273508, age: 40, year: 2030 },
+            { name: 'YOUR RETIREMENT (MK)', target: 661837, age: 46, year: 2036 },
+            { name: 'SPOUSE RETIREMENT (KJ)', target: 850000, age: 58, year: 2048 }
+        ]
     });
 
     // ============= Supabase Integration =============
