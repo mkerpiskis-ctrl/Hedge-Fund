@@ -11,7 +11,13 @@ import TradingJournal from './components/TradingJournal';
 function App() {
   const [session, setSession] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'calculators' | 'fireTracker' | 'ibkrTracker' | 'tradingJournal'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'calculators' | 'fireTracker' | 'ibkrTracker' | 'tradingJournal'>(() => {
+    return (localStorage.getItem('activeTab') as any) || 'dashboard';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('activeTab', activeTab);
+  }, [activeTab]);
 
   // Change Password State
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
