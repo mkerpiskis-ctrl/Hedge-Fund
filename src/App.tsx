@@ -3,10 +3,10 @@ import { supabase } from './supabaseClient';
 import { migrateLocalDataToCloud } from './utils/cloudMigration';
 import Auth from './components/Auth';
 import EmpireDashboard from './components/EmpireDashboard';
-import AllWeatherCalculator from './components/AllWeatherCalculator';
+import RebalancingCalculator from './components/RebalancingCalculator';
 import FireTracker from './components/FireTracker';
 import IBKRTracker from './components/IBKRTracker';
-import TradingJournalV2 from './components/TradingJournalV2';
+import TradingJournal from './components/TradingJournal';
 
 function App() {
   const [session, setSession] = useState<any>(null);
@@ -235,7 +235,7 @@ function App() {
                 </div>
                 <span className="text-xs text-slate-500 font-mono">LIVE</span>
               </div>
-              <AllWeatherCalculator />
+              <RebalancingCalculator />
             </div>
           </div>
         )}
@@ -281,7 +281,7 @@ function App() {
         {activeTab === 'tradingJournal' && (
           <div className="animate-fade-in">
             <div className="premium-card p-6 h-full bg-slate-900/80 backdrop-blur-sm">
-              <TradingJournalV2 />
+              <TradingJournal />
             </div>
           </div>
         )}

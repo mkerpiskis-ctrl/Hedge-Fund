@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
+import { supabase } from '../supabaseClient';
 
 // ============= Types =============
 interface SetupCategory {
@@ -88,53 +89,103 @@ const FUTURES_SYMBOLS: Record<string, { pointValue: number, commission: number }
 
 const TradingJournal = () => {
     // ============= State =============
-    const [entries, setEntries] = useState<JournalEntry[]>(() => {
-        const saved = localStorage.getItem('tradingJournalEntries');
-        if (!saved) return [];
-        const parsed = JSON.parse(saved);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        return parsed.map((e: any) => {
-            if (Array.isArray(e.criteriaUsed)) {
-                return { ...e, criteriaUsed: { htf: e.criteriaUsed, ltf: [], etf: [] } };
-            }
-            return e;
-        });
-    });
+    const [user, setUser] = useState<any>(null);
 
-    const [setups, setSetups] = useState<SetupCategory[]>(() => {
-        const saved = localStorage.getItem('tradingJournalSetups');
-        if (!saved) return DEFAULT_SETUPS;
-        const parsed = JSON.parse(saved);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        return parsed.map((s: any) => {
-            // Migration: Ensure criteria structure and checklist exist
-            const criteria = Array.isArray(s.criteria) ? { htf: s.criteria, ltf: [], etf: [] } : s.criteria;
-            const checklist = s.checklist || [];
-            return { ...s, criteria, checklist };
+    useEffect(() => {
+        supabase.auth.getSession().then(({ data: { session } }) => {
+            setUser(session?.user ?? null);
         });
-    });
+    }, []);
 
+    const [entries, setEntries] = useState<JournalEntry[]>([]);
+    const [setups, setSetups] = useState<SetupCategory[]>(DEFAULT_SETUPS);
     const [activeSubTab, setActiveSubTab] = useState<'history' | 'totalStats' | 'setupStats'>('history');
+    const [criteriaLibrary, setCriteriaLibrary] = useState<{ htf: string[], ltf: string[], etf: string[] }>(DEFAULT_CRITERIA);
+    const [achievements, setAchievements] = useState<Achievement[]>(DEFAULT_ACHIEVEMENTS);
 
-    const [criteriaLibrary, setCriteriaLibrary] = useState<{ htf: string[], ltf: string[], etf: string[] }>(() => {
-        const saved = localStorage.getItem('tradingJournalCriteria');
-        if (!saved) return DEFAULT_CRITERIA;
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-            return { htf: parsed, ltf: [], etf: [] };
-        }
-        return parsed;
-    });
+    const [isLoading, setIsLoading] = useState(true);
 
-    const [achievements, setAchievements] = useState<Achievement[]>(() => {
-        const saved = localStorage.getItem('tradingJournalAchievements');
-        if (!saved) return DEFAULT_ACHIEVEMENTS;
-        const parsed = JSON.parse(saved);
-        return DEFAULT_ACHIEVEMENTS.map(def => {
-            const savedAch = parsed.find((p: Achievement) => p.id === def.id);
-            return savedAch ? { ...def, unlocked: savedAch.unlocked, date: savedAch.date } : def;
-        });
-    });
+    // Load Data from Supabase
+    useEffect(() => {
+        if (!user) return;
+
+        const loadData = async () => {
+            setIsLoading(true);
+            try {
+                // 1. Entries
+                const { data: dbEntries } = await supabase.from('journal_entries').select('*').eq('user_id', user.id);
+                if (dbEntries) {
+                    const mappedEntries: JournalEntry[] = dbEntries.map((e: any) => ({
+                        id: e.id,
+                        date: e.date,
+                        time: e.time,
+                        symbol: e.symbol,
+                        direction: e.direction,
+                        tickValue: Number(e.tick_value),
+                        tickSize: Number(e.tick_size),
+                        setupId: e.setup_id,
+                        criteriaUsed: e.criteria_used || { htf: [], ltf: [], etf: [] },
+                        entry: Number(e.entry_price),
+                        exit: Number(e.exit_price),
+                        stopLoss: Number(e.stop_loss),
+                        takeProfit: Number(e.take_profit),
+                        mfePrice: Number(e.mfe_price),
+                        maxMovePoints: Number(e.max_move_points),
+                        quantity: Number(e.quantity),
+                        commissions: Number(e.commissions),
+                        pnl: Number(e.pnl),
+                        pnlPercent: Number(e.pnl_percent),
+                        rMultiple: Number(e.r_multiple),
+                        result: e.result,
+                        images: e.images || { htf: null, ltf: null, etf: null },
+                        notes: e.notes || ''
+                    }));
+                    setEntries(mappedEntries);
+                }
+
+                // 2. Setups & Criteria
+                const { data: dbSetups } = await supabase.from('journal_setups').select('*').eq('user_id', user.id);
+                if (dbSetups) {
+                    const loadedSetups: SetupCategory[] = [];
+                    let loadedCriteria = DEFAULT_CRITERIA;
+
+                    dbSetups.forEach((s: any) => {
+                        if (s.id === 'global_criteria') {
+                            loadedCriteria = s.criteria;
+                        } else {
+                            loadedSetups.push({
+                                id: s.id,
+                                name: s.name,
+                                criteria: s.criteria || { htf: [], ltf: [], etf: [] },
+                                checklist: s.checklist || [],
+                                color: s.color || 'blue'
+                            });
+                        }
+                    });
+
+                    if (loadedSetups.length > 0) setSetups(loadedSetups);
+                    setCriteriaLibrary(loadedCriteria);
+                }
+
+                // 3. Achievements
+                const { data: dbAchs } = await supabase.from('journal_achievements').select('*').eq('user_id', user.id);
+                if (dbAchs && dbAchs.length > 0) {
+                    const mappedAchs = DEFAULT_ACHIEVEMENTS.map(def => {
+                        const saved = dbAchs.find((d: any) => d.id === def.id);
+                        return saved ? { ...def, unlocked: saved.unlocked, date: saved.unlocked_at } : def;
+                    });
+                    setAchievements(mappedAchs);
+                }
+
+            } catch (err) {
+                console.error('Error loading journal data:', err);
+            } finally {
+                setIsLoading(false);
+            }
+        };
+
+        loadData();
+    }, [user]);
 
     // Filters
     const [filterSetup, setFilterSetup] = useState<string>('all');
@@ -167,79 +218,85 @@ const TradingJournal = () => {
         takeProfit: '',
         entry: '',
         exit: '',
-        mfePrice: '', // Changed from maxMove
+        mfePrice: '',
+        maxMovePoints: '',
         quantity: '1',
-        commissions: '1.82', // Default MES Commission
+        commissions: '1.82',
         notes: '',
         images: { htf: null, ltf: null, etf: null } as { htf: string | null, ltf: string | null, etf: string | null },
     });
 
     // ============= Effects =============
-    useEffect(() => {
-        localStorage.setItem('tradingJournalEntries', JSON.stringify(entries));
-    }, [entries]);
-
-    useEffect(() => {
-        localStorage.setItem('tradingJournalSetups', JSON.stringify(setups));
-    }, [setups]);
-
-    useEffect(() => {
-        localStorage.setItem('tradingJournalCriteria', JSON.stringify(criteriaLibrary));
-    }, [criteriaLibrary]);
-
-    useEffect(() => {
-        localStorage.setItem('tradingJournalAchievements', JSON.stringify(achievements));
-    }, [achievements]);
-
     const [checklistProgress, setChecklistProgress] = useState<string[]>([]);
 
-    const evaluateAchievements = useCallback(() => {
-        if (entries.length === 0) return;
+    const checkAchievements = useCallback(async () => {
+        if (!user) return;
 
-        const newAchievements = [...achievements];
+        const updatedAchievements = [...achievements];
         let changed = false;
 
-        const unlock = (id: string) => {
-            const ach = newAchievements.find(a => a.id === id);
+        const unlock = (id: string, date: string) => {
+            const ach = updatedAchievements.find(a => a.id === id);
             if (ach && !ach.unlocked) {
                 ach.unlocked = true;
-                ach.date = new Date().toISOString();
+                ach.date = date;
                 changed = true;
             }
         };
 
-        // 1. First Blood
-        unlock('first_blood');
+        // 1. First Blood (First Trade)
+        if (entries.length > 0) {
+            const first = [...entries].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())[0];
+            if (first) unlock('first_blood', first.date);
+        }
 
-        // 2. In The Green
-        if (entries.some(e => e.result === 'WIN')) unlock('in_the_green');
-
-        // 3. Hat Trick (3 wins in a row)
-        const sorted = [...entries].sort((a, b) => new Date(b.date + 'T' + b.time).getTime() - new Date(a.date + 'T' + a.time).getTime());
-        let consecutiveWins = 0;
+        // 2. Hat Trick (3 wins in a row)
+        const sorted = [...entries].sort((a, b) => new Date(a.date + 'T' + a.time).getTime() - new Date(b.date + 'T' + b.time).getTime());
+        let winStreak = 0;
+        let hatTrickDate = '';
         for (const e of sorted) {
-            if (e.result === 'WIN') consecutiveWins++;
-            else consecutiveWins = 0;
-            if (consecutiveWins >= 3) {
-                unlock('hat_trick');
-                break;
+            if (e.result === 'WIN') {
+                winStreak++;
+                if (winStreak >= 3) hatTrickDate = e.date;
+            } else {
+                winStreak = 0;
             }
         }
+        if (winStreak >= 3) unlock('hat_trick', hatTrickDate);
 
-        // 4. Sniper (> 60% WR, min 20 trades)
+        // 3. Sniper (>60% win rate, min 20 trades)
         if (entries.length >= 20) {
             const wins = entries.filter(e => e.result === 'WIN').length;
-            if ((wins / entries.length) >= 0.6) unlock('sniper');
+            if ((wins / entries.length) >= 0.6) unlock('sniper', new Date().toISOString().split('T')[0]);
         }
+
+        // 4. In The Green (First Win)
+        const firstWin = entries.find(e => e.result === 'WIN');
+        if (firstWin) unlock('in_the_green', firstWin.date);
 
         if (changed) {
-            setAchievements(newAchievements);
+            setAchievements(updatedAchievements);
+
+            const newlyUnlocked = updatedAchievements.filter(ua => ua.unlocked && !achievements.find(oa => oa.id === ua.id && oa.unlocked));
+
+            for (const ach of newlyUnlocked) {
+                await supabase.from('journal_achievements').upsert({
+                    user_id: user.id,
+                    id: ach.id,
+                    unlocked: true,
+                    unlocked_at: ach.date ? new Date(ach.date).toISOString() : new Date().toISOString()
+                });
+            }
+
+            if (newlyUnlocked.length > 0) {
+                setTimeout(() => alert(`🏆 Unlocked: ${newlyUnlocked.map(a => a.title).join(', ')}`), 100);
+            }
         }
-    }, [entries, achievements]);
+    }, [entries, achievements, user]);
 
     useEffect(() => {
-        evaluateAchievements();
-    }, [entries]);
+        checkAchievements();
+    }, [checkAchievements]);
 
     useEffect(() => {
         if (activeSubTab === 'setupStats' && filterSetup === 'all' && setups.length > 0) {
@@ -484,102 +541,79 @@ const TradingJournal = () => {
         }));
     };
 
-    const handleSubmit = () => {
-        // Validation: Check Checklist
-        const setup = setups.find(s => s.id === formData.setupId);
-        if (setup && setup.checklist && setup.checklist.length > 0) {
-            const isComplete = setup.checklist.every(item => checklistProgress.includes(item));
-            if (!isComplete) {
-                alert('Please complete the Trading Plan checklist before logging the trade.');
-                return;
-            }
-        }
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!user) return;
 
-        const entry = parseFloat(formData.entry) || 0;
-        const exit = parseFloat(formData.exit) || 0;
-        const stopLoss = parseFloat(formData.stopLoss) || 0;
-        const quantity = parseFloat(formData.quantity) || 1;
-        const tickValue = parseFloat(formData.tickValue) || 1.25;
-        const tickSize = parseFloat(formData.tickSize) || 0.25;
-        const commissions = parseFloat(formData.commissions) || 0;
-        const mfePrice = parseFloat(formData.mfePrice); // Optional
+        const pnl = (Number(formData.exit) - Number(formData.entry)) * (formData.direction === 'Long' ? 1 : -1) * Number(formData.tickValue) * (Number(formData.quantity));
+        const risk = Math.abs(Number(formData.entry) - Number(formData.stopLoss)) * Number(formData.tickValue) * Number(formData.quantity);
+        const rMultiple = risk > 0 ? pnl / risk : 0;
+        const pnlPercent = (pnl / (Number(formData.entry) * Number(formData.quantity))) * 100;
 
-        // P&L Logic
-        let priceDiff = 0;
-        if (formData.direction === 'Long') {
-            priceDiff = exit - entry;
-        } else {
-            priceDiff = entry - exit;
-        }
-
-        // PnL = (Points / TickSize) * TickValue * Contracts - Commissions
-        const pnl = ((priceDiff / tickSize) * tickValue * quantity) - commissions;
-
-        // R-Multiple
-        let riskPerContract = 0;
-        if (formData.direction === 'Long') {
-            riskPerContract = Math.abs(entry - stopLoss);
-        } else {
-            riskPerContract = Math.abs(stopLoss - entry);
-        }
-
-        // Ensure R is signed correctly? Usually R is positive for wins, negative for losses.
-        // Or R-Multiple is a ratio. Ratio of Profit/Risk. 
-        // If PnL > 0, +R. If PnL < 0, -R.
-        // Theoretical R based on Exit:
-        const rewardPerContract = Math.abs(priceDiff);
-        let rMultiple = (riskPerContract > 0) ? (rewardPerContract / riskPerContract) : 0;
-        if (pnl < 0) rMultiple = -rMultiple;
-
-        let result: 'WIN' | 'LOSS' | 'BREAKEVEN' = 'BREAKEVEN';
-        if (pnl > 0) result = 'WIN';
-        else if (pnl < 0) result = 'LOSS';
-
-        // PnL Percent (ROI on Margin?) -> Futures ROI is based on Margin, but we don't track margin. 
-        // Just use price % change?
-        const pnlPercent = entry > 0 ? (priceDiff / entry) * 100 : 0;
-
-        // Max Move Points (for stats)
-        let maxMovePoints = 0;
-        if (!isNaN(mfePrice) && mfePrice !== 0) {
-            if (formData.direction === 'Long') {
-                maxMovePoints = mfePrice - entry;
-            } else {
-                maxMovePoints = entry - mfePrice;
-            }
-            if (maxMovePoints < 0) maxMovePoints = 0; // MFE implies favorable
-        }
+        const newEntryId = editingEntry ? editingEntry.id : crypto.randomUUID();
 
         const newEntry: JournalEntry = {
-            id: editingEntry?.id || `entry_${Date.now()}`,
+            id: newEntryId,
             date: formData.date,
             time: formData.time,
-            symbol: formData.symbol.toUpperCase(),
-            direction: formData.direction,
-            tickValue,
-            tickSize,
+            symbol: formData.symbol,
+            direction: formData.direction as 'Long' | 'Short',
+            tickValue: Number(formData.tickValue),
+            tickSize: Number(formData.tickSize),
             setupId: formData.setupId,
             criteriaUsed: formData.criteriaUsed,
-            entry,
-            exit,
-            stopLoss,
-            takeProfit: parseFloat(formData.takeProfit) || 0,
-            mfePrice: mfePrice || 0,
-            maxMovePoints,
-            quantity,
-            commissions,
-            pnl,
-            pnlPercent,
-            rMultiple,
-            result,
+            entry: Number(formData.entry),
+            exit: Number(formData.exit),
+            stopLoss: Number(formData.stopLoss),
+            takeProfit: Number(formData.takeProfit),
+            mfePrice: Number(formData.mfePrice),
+            maxMovePoints: Number(formData.maxMovePoints),
+            quantity: Number(formData.quantity),
+            commissions: Number(formData.commissions),
+            pnl: pnl - Number(formData.commissions),
+            pnlPercent: pnlPercent,
+            rMultiple: rMultiple,
+            result: (pnl - Number(formData.commissions)) > 0 ? 'WIN' : (pnl - Number(formData.commissions)) < 0 ? 'LOSS' : 'BREAKEVEN',
             images: formData.images,
-            notes: formData.notes,
+            notes: formData.notes
         };
 
         if (editingEntry) {
-            setEntries(prev => prev.map(e => e.id === editingEntry.id ? newEntry : e));
+            setEntries(entries.map(e => e.id === newEntry.id ? newEntry : e));
         } else {
-            setEntries(prev => [newEntry, ...prev]);
+            setEntries([...entries, newEntry]);
+        }
+
+        const { error } = await supabase.from('journal_entries').upsert({
+            user_id: user.id,
+            id: newEntry.id,
+            date: newEntry.date,
+            time: newEntry.time,
+            symbol: newEntry.symbol,
+            direction: newEntry.direction,
+            tick_value: newEntry.tickValue,
+            tick_size: newEntry.tickSize,
+            setup_id: newEntry.setupId,
+            criteria_used: newEntry.criteriaUsed,
+            entry_price: newEntry.entry,
+            exit_price: newEntry.exit,
+            stop_loss: newEntry.stopLoss,
+            take_profit: newEntry.takeProfit,
+            mfe_price: newEntry.mfePrice,
+            max_move_points: newEntry.maxMovePoints,
+            quantity: newEntry.quantity,
+            commissions: newEntry.commissions,
+            pnl: newEntry.pnl,
+            pnl_percent: newEntry.pnlPercent,
+            r_multiple: newEntry.rMultiple,
+            result: newEntry.result,
+            images: newEntry.images,
+            notes: newEntry.notes
+        });
+
+        if (error) {
+            console.error('Error saving entry:', error);
+            alert('Failed to save entry to cloud!');
         }
 
         resetForm();
@@ -600,6 +634,7 @@ const TradingJournal = () => {
             entry: '',
             exit: '',
             mfePrice: '',
+            maxMovePoints: '',
             quantity: '1',
             commissions: '1.82',
             notes: '',
@@ -672,6 +707,7 @@ const TradingJournal = () => {
             stopLoss: entry.stopLoss.toString(),
             takeProfit: entry.takeProfit.toString(),
             mfePrice,
+            maxMovePoints: entry.maxMovePoints?.toString() || '',
             quantity: entry.quantity.toString(),
             commissions: entry.commissions?.toString() || '',
             notes: entry.notes,
@@ -681,76 +717,123 @@ const TradingJournal = () => {
         setShowNewEntry(true);
     };
 
-    const deleteEntry = (id: string) => {
-        if (confirm('Delete this journal entry?')) {
+    const deleteEntry = async (id: string) => {
+        if (!user) return;
+        if (window.confirm('Delete this journal entry?')) {
             setEntries(prev => prev.filter(e => e.id !== id));
+            const { error } = await supabase.from('journal_entries').delete().eq('user_id', user.id).eq('id', id);
+            if (error) console.error('Error deleting from cloud:', error);
         }
+    };
+
+    const saveSetupToDb = async (setup: SetupCategory) => {
+        if (!user) return;
+        await supabase.from('journal_setups').upsert({
+            user_id: user.id,
+            id: setup.id,
+            name: setup.name,
+            criteria: setup.criteria,
+            checklist: setup.checklist,
+            color: setup.color
+        });
     };
 
     const addSetup = () => {
         if (!newSetupName.trim()) return;
+        // Basic sanitization for ID
+        const id = newSetupName.trim().toLowerCase().replace(/\s+/g, '_');
+
         const newSetup: SetupCategory = {
-            id: `setup_${Date.now()}`,
+            id,
             name: newSetupName.trim(),
             criteria: { htf: [], ltf: [], etf: [] },
             checklist: [],
-            color: ['blue', 'purple', 'emerald', 'amber', 'rose', 'cyan'][Math.floor(Math.random() * 6)],
+            color: 'blue'
         };
-        setSetups(prev => [...prev, newSetup]);
+        setSetups([...setups, newSetup]);
+        saveSetupToDb(newSetup);
         setNewSetupName('');
     };
 
-    const deleteSetup = (id: string) => {
-        setSetups(prev => prev.filter(s => s.id !== id));
+    const deleteSetup = async (id: string) => {
+        if (!user) return;
+        if (window.confirm('Delete this setup category?')) {
+            setSetups(setups.filter(s => s.id !== id));
+            await supabase.from('journal_setups').delete().eq('user_id', user.id).eq('id', id);
+        }
     };
 
-    const addCriteriaToSetup = (setupId: string, criteria: string, category: 'htf' | 'ltf' | 'etf' = 'htf') => {
-        if (!criteria.trim()) return;
-        setSetups(prev => prev.map(s => {
-            if (s.id !== setupId) return s;
-            const currentCat = s.criteria[category] || [];
-            if (currentCat.includes(criteria)) return s;
-            return {
-                ...s,
-                criteria: {
-                    ...s.criteria,
-                    [category]: [...currentCat, criteria]
+    const addCriteriaToSetup = (setupId: string, timeframe: 'htf' | 'ltf' | 'etf', criteria: string) => {
+        const updatedSetups = setups.map(s => {
+            if (s.id === setupId) {
+                const updated = {
+                    ...s,
+                    criteria: {
+                        ...s.criteria,
+                        [timeframe]: [...(s.criteria[timeframe] || []), criteria]
+                    }
+                };
+                saveSetupToDb(updated);
+                return updated;
+            }
+            return s;
+        });
+        setSetups(updatedSetups);
+    };
+
+    const removeCriteriaFromSetup = (setupId: string, timeframe: 'htf' | 'ltf' | 'etf', criteria: string) => {
+        const updatedSetups = setups.map(s => {
+            if (s.id === setupId) {
+                const updated = {
+                    ...s,
+                    criteria: {
+                        ...s.criteria,
+                        [timeframe]: (s.criteria[timeframe] || []).filter(c => c !== criteria)
+                    }
+                };
+                saveSetupToDb(updated);
+                return updated;
+            }
+            return s;
+        });
+        setSetups(updatedSetups);
+    };
+
+
+
+    // Checklist handlers
+    const addChecklistItem = (setupId: string, itemText?: string) => {
+        const text = itemText || prompt('New checklist item:');
+        if (text) {
+            const updatedSetups = setups.map(s => {
+                if (s.id === setupId) {
+                    const updated = {
+                        ...s,
+                        checklist: [...(s.checklist || []), text]
+                    };
+                    saveSetupToDb(updated);
+                    return updated;
                 }
-            };
-        }));
-        setNewCriteria('');
+                return s;
+            });
+            setSetups(updatedSetups);
+        }
     };
 
-    const removeCriteriaFromSetup = (setupId: string, criteria: string, category: 'htf' | 'ltf' | 'etf') => {
-        setSetups(prev => prev.map(s => {
-            if (s.id !== setupId) return s;
-            return {
-                ...s,
-                criteria: {
-                    ...s.criteria,
-                    [category]: (s.criteria[category] || []).filter(c => c !== criteria)
-                }
-            };
-        }));
-    };
-
-    const addChecklistToSetup = (setupId: string, item: string) => {
-        if (!item.trim()) return;
-        setSetups(prev => prev.map(s => {
-            if (s.id !== setupId) return s;
-            if (s.checklist.includes(item)) return s;
-            return { ...s, checklist: [...s.checklist, item] };
-        }));
-    };
-
-    const removeChecklistFromSetup = (setupId: string, item: string) => {
-        setSetups(prev => prev.map(s => {
-            if (s.id !== setupId) return s;
-            return { ...s, checklist: s.checklist.filter(i => i !== item) };
-        }));
-    };
-
-    const getSetupById = (id: string) => setups.find(s => s.id === id);
+    const removeChecklistItem = (setupId: string, item: string) => {
+        const updatedSetups = setups.map(s => {
+            if (s.id === setupId) {
+                const updated = {
+                    ...s,
+                    checklist: (s.checklist || []).filter(i => i !== item)
+                };
+                saveSetupToDb(updated);
+                return updated;
+            }
+            return s;
+        });
+        setSetups(updatedSetups);
+    }; const getSetupById = (id: string) => setups.find(s => s.id === id);
 
     const getSetupColor = (setupId: string) => {
         const setup = getSetupById(setupId);
@@ -776,8 +859,16 @@ const TradingJournal = () => {
         </div>
     );
 
+
     // ============= Render =============
-    console.log('TradingJournal v2.5.1-FORCE loaded');
+    if (isLoading) {
+        return (
+            <div className="flex items-center justify-center p-12">
+                <div className="text-amber-500 animate-pulse text-xl">Loading Journal Data...</div>
+            </div>
+        );
+    }
+
     return (
         <div className="space-y-6">
             {/* Header */}
@@ -1556,7 +1647,7 @@ const TradingJournal = () => {
                                                                 {(setup.criteria[cat] || []).map(c => (
                                                                     <span key={c} className="px-1.5 py-0.5 bg-slate-800 text-slate-400 text-[10px] rounded border border-slate-700 flex items-center gap-1 group">
                                                                         {c}
-                                                                        <button onClick={() => removeCriteriaFromSetup(setup.id, c, cat)} className="text-slate-600 hover:text-rose-400 opacity-0 group-hover:opacity-100">✕</button>
+                                                                        <button onClick={() => removeCriteriaFromSetup(setup.id, cat, c)} className="text-slate-600 hover:text-rose-400 opacity-0 group-hover:opacity-100">✕</button>
                                                                     </span>
                                                                 ))}
                                                             </div>
@@ -1565,7 +1656,7 @@ const TradingJournal = () => {
                                                                     className="w-full bg-slate-900 text-[10px] text-slate-400 border border-slate-800 rounded px-2 py-1 outline-none focus:border-amber-500/50 appearance-none"
                                                                     onChange={(e) => {
                                                                         if (e.target.value) {
-                                                                            addCriteriaToSetup(setup.id, e.target.value, cat);
+                                                                            addCriteriaToSetup(setup.id, cat, e.target.value);
                                                                             e.target.value = '';
                                                                         }
                                                                     }}
@@ -1596,7 +1687,7 @@ const TradingJournal = () => {
                                                                             <div className="w-3 h-3 rounded-full border border-slate-700 bg-slate-800"></div>
                                                                             <span className="text-xs text-slate-300">{item}</span>
                                                                         </div>
-                                                                        <button onClick={() => removeChecklistFromSetup(setup.id, item)} className="text-slate-600 hover:text-rose-400 text-[10px] opacity-0 group-hover:opacity-100 px-2">Remove</button>
+                                                                        <button onClick={() => removeChecklistItem(setup.id, item)} className="text-slate-600 hover:text-rose-400 text-[10px] opacity-0 group-hover:opacity-100 px-2">Remove</button>
                                                                     </div>
                                                                 ))
                                                             )}
@@ -1609,7 +1700,7 @@ const TradingJournal = () => {
                                                                 onKeyDown={(e) => {
                                                                     if (e.key === 'Enter') {
                                                                         const target = e.target as HTMLInputElement;
-                                                                        addChecklistToSetup(setup.id, target.value);
+                                                                        addChecklistItem(setup.id, target.value);
                                                                         target.value = '';
                                                                     }
                                                                 }}

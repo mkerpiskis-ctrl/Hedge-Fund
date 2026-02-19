@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
+import { supabase } from '../supabaseClient';
 
 // Types
 interface BusinessMetric {
@@ -21,10 +22,18 @@ interface FireEntry {
 
 export default function EmpireDashboard() {
     // --- STATE ---
+    // --- STATE ---
     const [businessData, setBusinessData] = useState<BusinessMetric[]>([]);
     const [fireData, setFireData] = useState<FireEntry[]>([]);
     const [isLogModalOpen, setLogModalOpen] = useState(false);
     const [isEditBizModalOpen, setEditBizModalOpen] = useState(false);
+    const [user, setUser] = useState<any>(null);
+
+    useEffect(() => {
+        supabase.auth.getSession().then(({ data: { session } }) => {
+            setUser(session?.user ?? null);
+        });
+    }, []);
 
     // Form State
     const [logForm, setLogForm] = useState({
@@ -44,27 +53,61 @@ export default function EmpireDashboard() {
 
     // --- INIT / MOCK DATA ---
     useEffect(() => {
-        // Business Data
-        const savedBiz = localStorage.getItem('empire_business_data');
-        if (savedBiz) {
-            setBusinessData(JSON.parse(savedBiz));
-        } else {
-            // Mock Data Jan 2026
-            setBusinessData([
-                { month: '2026-01-01', c2Subs: 8, etoroCopiers: 12, auc: 45000, netIncome: 1250 },
-                { month: '2026-02-01', c2Subs: 8, etoroCopiers: 12, auc: 45000, netIncome: 1250 } // Duplicate for line visibility
-            ]);
-        }
+        if (!user) return;
 
-        // Fire Data (Read from existing FireTracker if available)
-        const savedFire = localStorage.getItem('fire_tracker_entries');
-        if (savedFire) {
-            setFireData(JSON.parse(savedFire));
-        }
-    }, []);
+        const loadData = async () => {
+            // 1. Business Data
+            const { data: biz } = await supabase
+                .from('business_metrics')
+                .select('*')
+                .eq('user_id', user.id)
+                .order('month', { ascending: true });
+
+            if (biz) {
+                const mappedBiz: BusinessMetric[] = biz.map((b: any) => ({
+                    month: b.month,
+                    c2Subs: b.c2_subs,
+                    etoroCopiers: b.etoro_copiers,
+                    auc: b.auc,
+                    netIncome: b.net_income
+                }));
+                // If empty, maybe add mock? Or just leave empty.
+                if (mappedBiz.length === 0) {
+                    setBusinessData([
+                        { month: '2026-01-01', c2Subs: 8, etoroCopiers: 12, auc: 45000, netIncome: 1250 }
+                    ]);
+                } else {
+                    setBusinessData(mappedBiz);
+                }
+            }
+
+            // 2. Fire Data (Read from DB)
+            const { data: fire } = await supabase
+                .from('fire_entries')
+                .select('*')
+                .eq('user_id', user.id)
+                .order('date', { ascending: false });
+
+            if (fire) {
+                const mappedFire: FireEntry[] = fire.map((f: any) => ({
+                    date: f.date,
+                    capitalUsd: f.capital_usd,
+                    capitalEuro: f.capital_euro,
+                    contributionMkUsd: f.contribution_mk_usd,
+                    contributionKjUsd: f.contribution_kj_usd,
+                    fxRate: f.fx_rate
+                }));
+                setFireData(mappedFire);
+            }
+        };
+
+        loadData();
+    }, [user]);
 
     // --- HANDLERS ---
-    const handleLogSubmit = () => {
+    const handleLogSubmit = async () => {
+        if (!user) return;
+
         // 1. Process Business Data
         const newBiz: BusinessMetric = {
             month: logForm.month,
@@ -73,9 +116,19 @@ export default function EmpireDashboard() {
             auc: parseFloat(logForm.auc) || 0,
             netIncome: parseFloat(logForm.netIncome) || 0
         };
+
+        // Optimistic UI
         const updatedBiz = [...businessData, newBiz].sort((a, b) => new Date(a.month).getTime() - new Date(b.month).getTime());
         setBusinessData(updatedBiz);
-        localStorage.setItem('empire_business_data', JSON.stringify(updatedBiz));
+
+        await supabase.from('business_metrics').upsert({
+            user_id: user.id,
+            month: newBiz.month,
+            c2_subs: newBiz.c2Subs,
+            etoro_copiers: newBiz.etoroCopiers,
+            auc: newBiz.auc,
+            net_income: newBiz.netIncome
+        }, { onConflict: 'user_id, month' });
 
         // 2. Process Personal Data (FireVault)
         const pUsd = parseFloat(logForm.portfolioUsd) || 0;
@@ -83,12 +136,6 @@ export default function EmpireDashboard() {
         const mkEur = parseFloat(logForm.mkEur) || 0;
         const mkUsd = parseFloat(logForm.mkUsd) || 0;
         const wifeEur = parseFloat(logForm.wifeEur) || 0;
-
-        // Total MK Contribution (USD) = MK_USD + (MK_EUR * FX)
-        // Note: Wife is usually EUR only, converted to USD for record? 
-        // Logic from spec: Total Monthly Added ($) = (Op_EUR + Wife_EUR) * Rate + Op_USD. 
-        // However, FireTracker stores specifically "MK Contrib USD" and "KJ Contrib USD".
-        // We will stick to FireTracker data structure for compatibility.
 
         const mkTotalUsd = mkUsd + (mkEur * fx);
         const kjTotalUsd = wifeEur * fx;
@@ -98,29 +145,42 @@ export default function EmpireDashboard() {
             capitalUsd: pUsd,
             capitalEuro: pUsd / fx,
             contributionMkUsd: mkTotalUsd,
-            contributionKjUsd: kjTotalUsd, // Assuming KJ is Wife
+            contributionKjUsd: kjTotalUsd,
             fxRate: fx
         };
 
-        // Append to existing FIRE data
+        // Optimistic UI
         const updatedFire = [newFire, ...fireData].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
         setFireData(updatedFire);
-        localStorage.setItem('fire_tracker_entries', JSON.stringify(updatedFire));
+
+        await supabase.from('fire_entries').insert({
+            user_id: user.id,
+            date: newFire.date,
+            capital_usd: newFire.capitalUsd,
+            capital_euro: newFire.capitalEuro,
+            contribution_mk_usd: newFire.contributionMkUsd,
+            contribution_kj_usd: newFire.contributionKjUsd,
+            fx_rate: newFire.fxRate
+        });
 
         setLogModalOpen(false);
         alert('Month Logged Successfully!');
     };
 
-    const handleDeleteBizEntry = (index: number) => {
+    const handleDeleteBizEntry = async (index: number) => {
+        if (!user) return;
         if (window.confirm('Delete this entry?')) {
+            const itemToDelete = businessData[index];
             const updated = [...businessData];
             updated.splice(index, 1);
             setBusinessData(updated);
-            localStorage.setItem('empire_business_data', JSON.stringify(updated));
+
+            await supabase.from('business_metrics').delete().eq('user_id', user.id).eq('month', itemToDelete.month);
         }
     };
 
-    const handleUpdateBizEntry = (index: number, field: keyof BusinessMetric, value: string) => {
+    const handleUpdateBizEntry = async (index: number, field: keyof BusinessMetric, value: string) => {
+        if (!user) return;
         const updated = [...businessData];
         // Handle number parsing
         if (field === 'month') {
@@ -131,7 +191,17 @@ export default function EmpireDashboard() {
             updated[index][field] = parseFloat(value) || 0;
         }
         setBusinessData(updated);
-        localStorage.setItem('empire_business_data', JSON.stringify(updated));
+
+        // Debounce or just save immediately? Immediate is fine for now
+        const item = updated[index];
+        await supabase.from('business_metrics').upsert({
+            user_id: user.id,
+            month: item.month,
+            c2_subs: item.c2Subs,
+            etoro_copiers: item.etoroCopiers,
+            auc: item.auc,
+            net_income: item.netIncome
+        }, { onConflict: 'user_id, month' });
     };
 
     // --- CALCULATIONS FOR UI ---

@@ -1,24 +1,61 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { supabase } from '../supabaseClient';
 
 const RebalancingCalculator: React.FC = () => {
-    // Load initial state from localStorage if available
-    const [breakoutValue, setBreakoutValue] = useState<number | ''>(() => {
-        const saved = localStorage.getItem('rebalance_breakout');
-        return saved ? parseFloat(saved) : '';
-    });
-    const [allWeatherValue, setAllWeatherValue] = useState<number | ''>(() => {
-        const saved = localStorage.getItem('rebalance_all_weather');
-        return saved ? parseFloat(saved) : '';
-    });
+    // Supabase User
+    const [user, setUser] = useState<any>(null);
 
-    // Save to localStorage whenever values change
-    React.useEffect(() => {
-        localStorage.setItem('rebalance_breakout', breakoutValue.toString());
-    }, [breakoutValue]);
+    useEffect(() => {
+        supabase.auth.getSession().then(({ data: { session } }) => {
+            setUser(session?.user ?? null);
+        });
+    }, []);
 
-    React.useEffect(() => {
-        localStorage.setItem('rebalance_all_weather', allWeatherValue.toString());
-    }, [allWeatherValue]);
+    // Load initial state
+    const [breakoutValue, setBreakoutValue] = useState<number | ''>('');
+    const [allWeatherValue, setAllWeatherValue] = useState<number | ''>('');
+    const [isLoading, setIsLoading] = useState(true);
+
+    // Load from DB
+    useEffect(() => {
+        if (!user) return;
+
+        const loadData = async () => {
+            const { data, error } = await supabase
+                .from('rebalancing_state')
+                .select('breakout_val, all_weather_val')
+                .eq('user_id', user.id)
+                .single();
+
+            if (data) {
+                setBreakoutValue(data.breakout_val === 0 ? '' : data.breakout_val);
+                setAllWeatherValue(data.all_weather_val === 0 ? '' : data.all_weather_val);
+            }
+            if (error && error.code !== 'PGRST116') { // PGRST116 is no rows returned
+                console.error('Error loading rebalancing state:', error);
+            }
+            setIsLoading(false);
+        };
+        loadData();
+    }, [user]);
+
+    // Save helpers
+    const saveState = async (bVal: number | '', awVal: number | '') => {
+        if (!user) return;
+        const b = bVal === '' ? 0 : bVal;
+        const aw = awVal === '' ? 0 : awVal;
+
+        await supabase.from('rebalancing_state').upsert({
+            user_id: user.id,
+            breakout_val: b,
+            all_weather_val: aw,
+            updated_at: new Date().toISOString()
+        });
+    };
+
+    const handleBlur = () => {
+        saveState(breakoutValue, allWeatherValue);
+    };
 
     const calculateRebalance = () => {
         const bVal = Number(breakoutValue) || 0;
@@ -49,6 +86,10 @@ const RebalancingCalculator: React.FC = () => {
 
     const result = calculateRebalance();
 
+    if (isLoading && user) {
+        return <div className="text-slate-500 text-xs animate-pulse">Loading calculator...</div>;
+    }
+
     return (
         <div className="font-sans text-sm">
             <div className="space-y-6">
@@ -59,6 +100,7 @@ const RebalancingCalculator: React.FC = () => {
                             type="number"
                             value={breakoutValue}
                             onChange={(e) => setBreakoutValue(parseFloat(e.target.value) || '')}
+                            onBlur={handleBlur}
                             className="glass-input w-full text-lg font-medium"
                             placeholder="0.00"
                         />
@@ -70,6 +112,7 @@ const RebalancingCalculator: React.FC = () => {
                             type="number"
                             value={allWeatherValue}
                             onChange={(e) => setAllWeatherValue(parseFloat(e.target.value) || '')}
+                            onBlur={handleBlur}
                             className="glass-input w-full text-lg font-medium"
                             placeholder="0.00"
                         />

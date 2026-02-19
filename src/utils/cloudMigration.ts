@@ -143,6 +143,136 @@ export const migrateLocalDataToCloud = async (userId: string) => {
             }
         }
 
+        // ==========================================
+        // 4. TRADING JOURNAL MIGRATION
+        // ==========================================
+        const journalEntriesStr = localStorage.getItem('tradingJournalEntries');
+        const journalSetupsStr = localStorage.getItem('tradingJournalSetups');
+        const journalCriteriaStr = localStorage.getItem('tradingJournalCriteria');
+        const journalAchStr = localStorage.getItem('tradingJournalAchievements');
+
+        // Entries
+        if (journalEntriesStr) {
+            const entries = JSON.parse(journalEntriesStr);
+            if (entries.length > 0) {
+                const { error } = await supabase.from('journal_entries').insert(
+                    entries.map((e: any) => ({
+                        user_id: userId,
+                        id: e.id,
+                        date: e.date,
+                        time: e.time,
+                        symbol: e.symbol,
+                        direction: e.direction,
+                        tick_value: parseFloat(e.tickValue) || 0,
+                        tick_size: parseFloat(e.tickSize) || 0,
+                        setup_id: e.setupId,
+                        criteria_used: e.criteriaUsed || {},
+                        entry_price: parseFloat(e.entry) || 0,
+                        exit_price: parseFloat(e.exit) || 0,
+                        stop_loss: parseFloat(e.stopLoss) || 0,
+                        take_profit: parseFloat(e.takeProfit) || 0,
+                        mfe_price: parseFloat(e.mfePrice) || 0,
+                        max_move_points: parseFloat(e.maxMovePoints) || 0,
+                        quantity: parseFloat(e.quantity) || 0,
+                        commissions: parseFloat(e.commissions) || 0,
+                        pnl: e.pnl,
+                        pnl_percent: e.pnlPercent,
+                        r_multiple: e.rMultiple,
+                        result: e.result,
+                        images: e.images || {},
+                        notes: e.notes || ''
+                    }))
+                );
+                if (error) console.error('Error migrating journal_entries:', error);
+                else console.log(`Migrated ${entries.length} journal entries`);
+            }
+        }
+
+        // Setups
+        if (journalSetupsStr) {
+            const setups = JSON.parse(journalSetupsStr);
+            if (setups.length > 0) {
+                const { error } = await supabase.from('journal_setups').upsert(
+                    setups.map((s: any) => ({
+                        user_id: userId,
+                        id: s.id,
+                        name: s.name,
+                        criteria: s.criteria || {},
+                        checklist: s.checklist || [],
+                        color: s.color
+                    }))
+                );
+                if (error) console.error('Error migrating journal_setups:', error);
+            }
+        }
+
+        // Global Criteria (Saved as a special setup 'global_criteria')
+        if (journalCriteriaStr) {
+            const criteria = JSON.parse(journalCriteriaStr);
+            const { error } = await supabase.from('journal_setups').upsert({
+                user_id: userId,
+                id: 'global_criteria',
+                name: 'Global Criteria Library',
+                criteria: criteria,
+                checklist: [],
+                color: 'gray'
+            });
+            if (error) console.error('Error migrating journal_criteria:', error);
+        }
+
+        // Achievements
+        if (journalAchStr) {
+            const achs = JSON.parse(journalAchStr);
+            if (achs.length > 0) {
+                const { error } = await supabase.from('journal_achievements').upsert(
+                    achs.map((a: any) => ({
+                        user_id: userId,
+                        id: a.id,
+                        unlocked: a.unlocked,
+                        unlocked_at: a.date ? new Date(a.date).toISOString() : null
+                    }))
+                );
+                if (error) console.error('Error migrating journal_achievements:', error);
+            }
+        }
+
+        // ==========================================
+        // 5. BUSINESS METRICS (DASHBOARD)
+        // ==========================================
+        const bizDataStr = localStorage.getItem('empire_business_data');
+        if (bizDataStr) {
+            const bizData = JSON.parse(bizDataStr);
+            if (bizData.length > 0) {
+                const { error } = await supabase.from('business_metrics').upsert(
+                    bizData.map((b: any) => ({
+                        user_id: userId,
+                        month: b.month,
+                        c2_subs: b.c2Subs || 0,
+                        etoro_copiers: b.etoroCopiers || 0,
+                        auc: b.auc || 0,
+                        net_income: b.netIncome || 0
+                    })),
+                    { onConflict: 'user_id, month' }
+                );
+                if (error) console.error('Error migrating business_metrics:', error);
+            }
+        }
+
+        // ==========================================
+        // 6. REBALANCING STATE
+        // ==========================================
+        const rebBreakout = localStorage.getItem('rebalance_breakout');
+        const rebAllWeather = localStorage.getItem('rebalance_all_weather');
+
+        if (rebBreakout || rebAllWeather) {
+            const { error } = await supabase.from('rebalancing_state').upsert({
+                user_id: userId,
+                breakout_val: parseFloat(rebBreakout || '0'),
+                all_weather_val: parseFloat(rebAllWeather || '0')
+            });
+            if (error) console.error('Error migrating rebalancing_state:', error);
+        }
+
         // Mark migration as done locally
         localStorage.setItem(MIGRATION_KEY, 'true');
         console.log('Cloud migration completed successfully.');
