@@ -717,10 +717,11 @@ const FireTracker: React.FC = () => {
                                             <button
                                                 onClick={async () => {
                                                     try {
-                                                        const res = await fetch('https://api.allorigins.win/get?url=' + encodeURIComponent('https://query1.finance.yahoo.com/v8/finance/chart/EURUSD=X?interval=1d&range=1d'));
+                                                        // Use reliable FX API (Frankfurter)
+                                                        const res = await fetch('https://api.frankfurter.app/latest?from=EUR&to=USD');
                                                         const data = await res.json();
-                                                        const json = JSON.parse(data.contents);
-                                                        const rate = json.chart.result[0].meta.regularMarketPrice;
+                                                        const rate = data.rates.USD;
+
                                                         if (rate) {
                                                             const newFx = rate.toFixed(4);
                                                             const fxVal = parseFloat(newFx);
