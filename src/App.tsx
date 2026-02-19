@@ -12,6 +12,12 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'calculators' | 'fireTracker' | 'ibkrTracker' | 'tradingJournal'>('dashboard');
 
+  // Change Password State
+  const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [changePasswordLoading, setChangePasswordLoading] = useState(false);
+  const [changePasswordMessage, setChangePasswordMessage] = useState('');
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
@@ -28,6 +34,26 @@ function App() {
     return () => subscription.unsubscribe();
   }, []);
 
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setChangePasswordLoading(true);
+    setChangePasswordMessage('');
+
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+
+    if (error) {
+      setChangePasswordMessage(`Error: ${error.message}`);
+    } else {
+      setChangePasswordMessage('Password updated successfully!');
+      setTimeout(() => {
+        setShowChangePasswordModal(false);
+        setNewPassword('');
+        setChangePasswordMessage('');
+      }, 2000);
+    }
+    setChangePasswordLoading(false);
+  };
+
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center text-slate-500 font-mono text-sm">Initializing Secure Environment...</div>;
   }
@@ -37,7 +63,52 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen p-4 md:p-8">
+    <div className="min-h-screen p-4 md:p-8 relative">
+      {/* Change Password Modal */}
+      {showChangePasswordModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm animate-fade-in">
+          <div className="bg-slate-900 border border-slate-700 p-8 rounded-2xl w-full max-w-md shadow-2xl">
+            <h2 className="text-xl font-bold text-slate-100 mb-6">Change Password</h2>
+            <form onSubmit={handleChangePassword} className="space-y-4">
+              <div>
+                <label className="block text-xs uppercase font-bold text-slate-500 mb-2">New Password</label>
+                <input
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-4 py-3 text-slate-200 focus:outline-none focus:border-emerald-500"
+                  placeholder="Minimum 6 characters"
+                  required
+                />
+              </div>
+
+              {changePasswordMessage && (
+                <div className={`p-3 rounded text-sm text-center ${changePasswordMessage.includes('Error') ? 'bg-rose-500/10 text-rose-400' : 'bg-emerald-500/10 text-emerald-400'}`}>
+                  {changePasswordMessage}
+                </div>
+              )}
+
+              <div className="flex space-x-4 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowChangePasswordModal(false)}
+                  className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg font-bold transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={changePasswordLoading}
+                  className="flex-1 py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-900 rounded-lg font-bold transition-colors disabled:opacity-50"
+                >
+                  {changePasswordLoading ? 'Updating...' : 'Update Password'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Top Bar */}
       <header className="max-w-7xl mx-auto mb-10 flex flex-col md:flex-row justify-between items-center animate-fade-in">
         <div className="flex items-center space-x-3 mb-4 md:mb-0">
@@ -55,6 +126,13 @@ function App() {
         </div>
 
         <div className="flex items-center space-x-6">
+          <button
+            onClick={() => setShowChangePasswordModal(true)}
+            className="text-xs text-slate-500 hover:text-emerald-400 transition-colors uppercase font-bold"
+          >
+            Change Password
+          </button>
+          <div className="h-4 w-px bg-slate-800 hidden md:block"></div>
           <button
             onClick={() => supabase.auth.signOut()}
             className="text-xs text-slate-500 hover:text-rose-500 transition-colors uppercase font-bold"
