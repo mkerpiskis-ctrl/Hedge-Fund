@@ -72,25 +72,49 @@ const AllWeatherCalculator: React.FC = () => {
             const { data: dbAssets } = await supabase.from('aw_assets').select('*').eq('user_id', user.id);
 
             if (dbAssets && dbAssets.length > 0) {
+                // Deduplication Logic
+                const uniqueAssets: Map<string, any> = new Map();
+                const duplicatesToDelete: string[] = [];
+
+                dbAssets.forEach((asset: any) => {
+                    const existing = uniqueAssets.get(asset.asset_id);
+                    if (existing) {
+                        // Keep the one updated more recently
+                        const existingDate = new Date(existing.updated_at).getTime();
+                        const currentDate = new Date(asset.updated_at).getTime();
+                        if (currentDate > existingDate) {
+                            duplicatesToDelete.push(existing.id);
+                            uniqueAssets.set(asset.asset_id, asset);
+                        } else {
+                            duplicatesToDelete.push(asset.id);
+                        }
+                    } else {
+                        uniqueAssets.set(asset.asset_id, asset);
+                    }
+                });
+
+                // Auto-cleanup duplicates
+                if (duplicatesToDelete.length > 0) {
+                    console.log('Cleaning up duplicate assets:', duplicatesToDelete);
+                    await supabase.from('aw_assets').delete().in('id', duplicatesToDelete);
+                }
+
+                const finalAssets = Array.from(uniqueAssets.values());
+
                 // Map DB to State
-                const mapped: Asset[] = dbAssets.map((row: any) => ({
+                const mapped: Asset[] = finalAssets.map((row: any) => ({
                     id: row.asset_id, // Use the string ID 'nasdaq'
                     name: row.name,
                     ticker: row.ticker,
                     targetWeight: row.target_weight,
-                    price: row.input_price === 0 ? '' : row.input_price, // Handle 0 as '' for inputs? 
-                    // Actually safeParse handles '' as 0. 
-                    // If we want friendly UI, '' is better for empty.
+                    price: row.input_price === 0 ? '' : row.input_price,
                     averagePrice: row.average_price === 0 ? '' : row.average_price,
                     units: row.input_units === 0 ? '' : row.input_units,
                     currency: row.currency,
                     isLocked: row.is_locked,
-                    // Store the UUID somewhere?
-                    // I will attach it as `_pk` hidden property if needed, but actually
-                    // I can just UPDATE where user_id=X and asset_id=Y.
                 }));
 
-                // Sort to match default order (optional but nice)
+                // Sort to match default order
                 const order = ['nasdaq', 'world_ex_usa', 'gold', 'treasuries', 'commodities', 'bitcoin'];
                 mapped.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
 
@@ -111,17 +135,12 @@ const AllWeatherCalculator: React.FC = () => {
                 }));
 
                 await supabase.from('aw_assets').insert(initialAssets);
-                // State is already DEFAULT_ASSETS
             }
         };
         loadData();
     }, [user]);
 
-    // We need to implement saveAsset correctly knowing there's no unique constraint on (user_id, asset_id).
-    // I can do: `update aw_assets set ... where user_id = ... and asset_id = ...`
-    // Supabase `.update(payload).eq('user_id', user.id).eq('asset_id', asset.id)`
-
-    // Redefine saveAsset
+    // Save Helpers
     const saveAssetToDb = async (asset: Asset) => {
         if (!user) return;
         const payload = {
@@ -130,15 +149,16 @@ const AllWeatherCalculator: React.FC = () => {
             input_units: asset.units === '' ? 0 : asset.units,
             average_price: asset.averagePrice === '' ? 0 : asset.averagePrice,
             currency: asset.currency,
-            is_locked: asset.isLocked
+            is_locked: asset.isLocked,
+            updated_at: new Date().toISOString()
         };
 
+        // Update using asset_id AND user_id to ensure we target the specific asset
         await supabase.from('aw_assets').update(payload).eq('user_id', user.id).eq('asset_id', asset.id);
     };
 
     const saveAllAssets = async (newAssets: Asset[]) => {
         if (!user) return;
-        // Batch update is hard with different values. Sequential is fine for 6 items.
         for (const asset of newAssets) {
             await saveAssetToDb(asset);
         }
