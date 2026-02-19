@@ -4,6 +4,7 @@ import { migrateLocalDataToCloud } from './utils/cloudMigration';
 import Auth from './components/Auth';
 import EmpireDashboard from './components/EmpireDashboard';
 import RebalancingCalculator from './components/RebalancingCalculator';
+import AllWeatherCalculator from './components/AllWeatherCalculator';
 import FireTracker from './components/FireTracker';
 import IBKRTracker from './components/IBKRTracker';
 import TradingJournal from './components/TradingJournal';
@@ -236,6 +237,8 @@ function App() {
                 <span className="text-xs text-slate-500 font-mono">LIVE</span>
               </div>
               <RebalancingCalculator />
+              <div className="my-8 border-t border-slate-800/50"></div>
+              <AllWeatherCalculator />
             </div>
           </div>
         )}
